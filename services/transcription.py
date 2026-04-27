@@ -1,3 +1,4 @@
+import io
 import logging
 from typing import Optional
 
@@ -16,29 +17,33 @@ class TranscriptionService:
         
         logger.info("Initializing AssemblyAI transcription service")
         aai.settings.api_key = config.assemblyai_api_key
-        self.config = aai.TranscriptionConfig(
-            language_code="ar",  # Arabic
-        )
+        self.transcriber = aai.Transcriber()
     
     def transcribe_audio(self, audio_data: bytes) -> str:
         try:
-            transcriber = aai.Transcriber()
+            logger.info(f"Transcribing audio: {len(audio_data)} bytes")
             
-            transcript = transcriber.transcribe(
-                audio_data,
-                config=self.config
-            )
+            # For bytes, we need to use upload_file first
+            upload_url = self.transcriber.upload_file(audio_data)
+            logger.info(f"Uploaded to: {upload_url}")
+            
+            transcript = self.transcriber.transcribe(upload_url)
             
             if transcript.status == aai.TranscriptStatus.error:
-                logger.error(f"AssemblyAI error: {transcript.error}")
-                raise Exception(transcript.error)
+                error_msg = transcript.error or "Unknown error"
+                logger.error(f"AssemblyAI error: {error_msg}")
+                raise Exception(error_msg)
             
-            text = transcript.text
+            if not transcript.text:
+                logger.warning("Empty transcription result")
+                return ""
+            
+            text = transcript.text.strip()
             logger.info(f"Transcription: {text[:100]}...")
             return text
             
         except Exception as e:
-            logger.error(f"Transcription error: {e}")
+            logger.error(f"Transcription error: {e}", exc_info=True)
             raise
 
 
