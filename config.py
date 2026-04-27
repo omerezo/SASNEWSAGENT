@@ -2,7 +2,9 @@ import os
 import json
 from dataclasses import dataclass
 from typing import Optional
+from dotenv import load_dotenv
 
+load_dotenv()
 
 @dataclass
 class Config:

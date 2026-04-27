@@ -18,10 +18,10 @@ class UserSession:
     user_id: int
     state: str
     transcribed_text: Optional[str] = None
-    article_ar: Optional[str] = None
-    article_en: Optional[str] = None
     title_ar: Optional[str] = None
     title_en: Optional[str] = None
+    content_ar: Optional[str] = None
+    content_en: Optional[str] = None
     excerpt_ar: Optional[str] = None
     excerpt_en: Optional[str] = None
     image_file_id: Optional[str] = None
@@ -70,10 +70,10 @@ class Database:
                     user_id=row[0],
                     state=row[1],
                     transcribed_text=row[2],
-                    article_ar=row[3],
-                    article_en=row[4],
-                    title_ar=row[5],
-                    title_en=row[6],
+                    title_ar=row[3],
+                    title_en=row[4],
+                    content_ar=row[5],
+                    content_en=row[6],
                     excerpt_ar=row[7],
                     excerpt_en=row[8],
                     image_file_id=row[9],
@@ -116,19 +116,11 @@ class Database:
             UPDATE user_sessions 
             SET {', '.join(set_cols)}, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = %s
-            RETURNING user_id, state, created_at, updated_at
         """
         with self.conn.cursor() as cur:
             cur.execute(query, values)
-            row = cur.fetchone()
             self.conn.commit()
-            if row:
-                return UserSession(
-                    user_id=int(row[0]),
-                    state=str(row[1]),
-                    created_at=row[2],
-                    updated_at=row[3]
-                )
+        
         return self.get_session(user_id)
     
     def delete_session(self, user_id: int):
