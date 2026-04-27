@@ -1,4 +1,5 @@
 import os
+import json
 from dataclasses import dataclass
 from typing import Optional
 
@@ -11,8 +12,8 @@ class Config:
     # Gemini
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     
-    # Google Cloud (for Speech-to-Text)
-    google_cloud_credentials: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+    # AssemblyAI (for transcription)
+    assemblyai_api_key: str = os.getenv("ASSEMBLYAI_API_KEY", "")
     
     # Website API
     website_base_url: str = os.getenv("WEBSITE_BASE_URL", "https://sas-academy.up.railway.app")

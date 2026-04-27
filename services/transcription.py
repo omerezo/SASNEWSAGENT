@@ -1,10 +1,7 @@
-import io
-import tempfile
 import logging
 from typing import Optional
 
-from google.cloud import speech_v2 as speech
-from google.cloud.speech_v2.types import RecognitionConfig
+import assemblyai as aai
 
 from config import config
 
@@ -14,39 +11,30 @@ logger = logging.getLogger(__name__)
 
 class TranscriptionService:
     def __init__(self):
-        self.client = speech.SpeechClient()
-        self.config = RecognitionConfig(
-            auto_decoding_config={},
-            language_code="ar-SA",
-            model="latest_long",
+        if not config.assemblyai_api_key:
+            raise ValueError("ASSEMBLYAI_API_KEY not set")
+        
+        aai.settings.api_key = config.assemblyai_api_key
+        self.config = aai.TranscriptionConfig(
+            language_code="ar",  # Arabic
         )
     
     def transcribe_audio(self, audio_data: bytes) -> str:
-        content = audio_data
-        
-        if len(audio_data) < 16000:
-            logger.warning(f"Audio too short: {len(audio_data)} bytes")
-        
-        audio = speech.RecognitionAudio(content=content)
-        
         try:
-            response = self.client.recognize(
-                config=self.config,
-                audio=audio
+            transcriber = aai.Transcriber()
+            
+            transcript = transcriber.transcribe(
+                audio_data,
+                config=self.config
             )
             
-            if not response.results:
-                logger.warning("No transcription results")
-                return ""
+            if transcript.status == aai.TranscriptStatus.error:
+                logger.error(f"AssemblyAI error: {transcript.error}")
+                raise Exception(transcript.error)
             
-            result = response.results[0]
-            if not result.alternatives:
-                logger.warning("No alternatives in result")
-                return ""
-            
-            transcript = result.alternatives[0].transcript
-            logger.info(f"Transcription: {transcript[:100]}...")
-            return transcript
+            text = transcript.text
+            logger.info(f"Transcription: {text[:100]}...")
+            return text
             
         except Exception as e:
             logger.error(f"Transcription error: {e}")

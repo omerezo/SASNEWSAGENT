@@ -8,6 +8,7 @@
   "deploy": {
     "numReplicas": 1,
     "restartPolicyType": "on_failure",
-    "restartPolicyMaxRetries": 3
+    "restartPolicyMaxRetries": 10,
+    "startCommand": "python main.py"
   }
 }
