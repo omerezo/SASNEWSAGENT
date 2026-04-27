@@ -75,37 +75,44 @@ def health():
 
 
 def handle_message(msg: dict):
-    user_id = msg["from"]["id"]
-    
-    db = get_db()
-    session = db.get_session(user_id)
-    
-    if not session:
-        session = db.create_session(user_id, "waiting_voice")
-    
-    if "voice" in msg:
-        handle_voice_message(user_id, msg["voice"], session, db)
-    elif "text" in msg:
-        handle_text_message(user_id, msg["text"], session, db)
-    elif "photo" in msg:
-        handle_photo_message(user_id, msg["photo"], session, db)
-    else:
-        send_message(user_id, "Please send a voice note to create a news article.")
+    try:
+        user_id = msg["from"]["id"]
+        
+        db = get_db()
+        session = db.get_session(user_id)
+        
+        if not session:
+            session = db.create_session(user_id, "waiting_voice")
+        
+        if "voice" in msg:
+            handle_voice_message(user_id, msg["voice"], session, db)
+        elif "text" in msg:
+            handle_text_message(user_id, msg["text"], session, db)
+        elif "photo" in msg:
+            handle_photo_message(user_id, msg["photo"], session, db)
+        else:
+            send_message(user_id, "Please send a voice note to create a news article.")
+    except Exception as e:
+        logger.error(f"handle_message error: {e}", exc_info=True)
+        user_id = msg.get("from", {}).get("id")
+        if user_id:
+            send_message(user_id, f"❌ Error: {str(e)}")
 
 
 def handle_voice_message(user_id: int, voice: dict, session, db):
-    send_message(user_id, "🎤 Processing your voice note...")
-    
-    file_info = get_file(voice["file_id"])
-    file_path = file_info.get("file_path")
-    
-    if not file_path:
-        send_message(user_id, "❌ Could not download audio.")
-        return
-    
-    audio_data = download_file(file_path)
-    
     try:
+        send_message(user_id, "🎤 Processing your voice note...")
+        
+        file_info = get_file(voice["file_id"])
+        file_path = file_info.get("file_path")
+        
+        if not file_path:
+            send_message(user_id, "❌ Could not download audio.")
+            return
+        
+        audio_data = download_file(file_path)
+        logger.info(f"Downloaded audio: {len(audio_data)} bytes")
+        
         transcription_service = get_transcription_service()
         transcribed_text = transcription_service.transcribe_audio(audio_data)
         
@@ -122,7 +129,7 @@ def handle_voice_message(user_id: int, voice: dict, session, db):
         )
         
     except Exception as e:
-        logger.error(f"Voice processing error: {e}")
+        logger.error(f"Voice processing error: {e}", exc_info=True)
         send_message(user_id, "❌ Error processing voice. Please try again.")
 
 
