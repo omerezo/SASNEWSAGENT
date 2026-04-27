@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
@@ -10,10 +11,13 @@ from psycopg2.extras import RealDictCursor
 from config import config
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class UserSession:
     user_id: int
-    state: str  # waiting_voice, waiting_confirmation, waiting_post
+    state: str
     transcribed_text: Optional[str] = None
     article_ar: Optional[str] = None
     article_en: Optional[str] = None
@@ -28,7 +32,13 @@ class UserSession:
 
 class Database:
     def __init__(self, conn=None):
-        self.conn = conn or psycopg2.connect(config.database_url, cursor_factory=RealDictCursor)
+        if conn:
+            self.conn = conn
+        else:
+            if not config.database_url:
+                raise ValueError("DATABASE_URL not set")
+            logger.info("Connecting to PostgreSQL")
+            self.conn = psycopg2.connect(config.database_url, cursor_factory=RealDictCursor)
         self._init_tables()
     
     def _init_tables(self):

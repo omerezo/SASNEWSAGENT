@@ -12,8 +12,9 @@ logger = logging.getLogger(__name__)
 class TranscriptionService:
     def __init__(self):
         if not config.assemblyai_api_key:
-            raise ValueError("ASSEMBLYAI_API_KEY not set")
+            raise ValueError("ASSEMBLYAI_API_KEY not set in config")
         
+        logger.info("Initializing AssemblyAI transcription service")
         aai.settings.api_key = config.assemblyai_api_key
         self.config = aai.TranscriptionConfig(
             language_code="ar",  # Arabic

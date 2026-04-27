@@ -38,6 +38,8 @@ def webhook():
         
         return jsonify({"ok": True})
     except Exception as e:
+        logger.error(f"Webhook error: {e}", exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
         logger.error(f"Webhook error: {e}")
         return jsonify({"ok": False}), 500
 
