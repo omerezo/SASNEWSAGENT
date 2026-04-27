@@ -42,7 +42,7 @@ class Database:
     
     def _init_tables(self):
         with self.conn.cursor() as cur:
-            # Create table with all needed columns
+            # Create table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_sessions (
                     user_id BIGINT PRIMARY KEY,
@@ -59,6 +59,23 @@ class Database:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Add missing columns if table exists but lacks them
+            columns_to_add = [
+                ("title_ar", "TEXT"),
+                ("title_en", "TEXT"),
+                ("content_ar", "TEXT"),
+                ("content_en", "TEXT"),
+                ("excerpt_ar", "TEXT"),
+                ("excerpt_en", "TEXT"),
+            ]
+            
+            for col_name, col_type in columns_to_add:
+                try:
+                    cur.execute(f"ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
+                except Exception:
+                    pass
+            
             self.conn.commit()
     
     def get_session(self, user_id: int) -> Optional[UserSession]:
