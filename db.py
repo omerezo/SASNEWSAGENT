@@ -42,15 +42,16 @@ class Database:
     
     def _init_tables(self):
         with self.conn.cursor() as cur:
+            # Create table with all needed columns
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_sessions (
                     user_id BIGINT PRIMARY KEY,
                     state VARCHAR(50) NOT NULL DEFAULT 'waiting_voice',
                     transcribed_text TEXT,
-                    article_ar TEXT,
-                    article_en TEXT,
                     title_ar TEXT,
                     title_en TEXT,
+                    content_ar TEXT,
+                    content_en TEXT,
                     excerpt_ar TEXT,
                     excerpt_en TEXT,
                     image_file_id VARCHAR(255),
