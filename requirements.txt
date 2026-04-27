@@ -1,15 +1,13 @@
-# Flask
+# Web Framework
 flask
 python-telegram-bot
 
 # Database
 psycopg2-binary
 
-# Google Cloud
-google-cloud-speech
-
 # AI
 google-genai
+assemblyai
 
 # HTTP
 requests
