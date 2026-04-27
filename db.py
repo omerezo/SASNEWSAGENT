@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
 
 from config import config
 
@@ -38,7 +37,7 @@ class Database:
             if not config.database_url:
                 raise ValueError("DATABASE_URL not set")
             logger.info("Connecting to PostgreSQL")
-            self.conn = psycopg2.connect(config.database_url, cursor_factory=RealDictCursor)
+            self.conn = psycopg2.connect(config.database_url)
         self._init_tables()
     
     def _init_tables(self):
@@ -62,23 +61,23 @@ class Database:
             self.conn.commit()
     
     def get_session(self, user_id: int) -> Optional[UserSession]:
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with self.conn.cursor() as cur:
             cur.execute("SELECT * FROM user_sessions WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
             if row:
                 return UserSession(
-                    user_id=row['user_id'],
-                    state=row['state'],
-                    transcribed_text=row['transcribed_text'],
-                    article_ar=row['article_ar'],
-                    article_en=row['article_en'],
-                    title_ar=row['title_ar'],
-                    title_en=row['title_en'],
-                    excerpt_ar=row['excerpt_ar'],
-                    excerpt_en=row['excerpt_en'],
-                    image_file_id=row['image_file_id'],
-                    created_at=row['created_at'],
-                    updated_at=row['updated_at']
+                    user_id=row[0],
+                    state=row[1],
+                    transcribed_text=row[2],
+                    article_ar=row[3],
+                    article_en=row[4],
+                    title_ar=row[5],
+                    title_en=row[6],
+                    excerpt_ar=row[7],
+                    excerpt_en=row[8],
+                    image_file_id=row[9],
+                    created_at=row[10],
+                    updated_at=row[11]
                 )
             return None
     
@@ -92,12 +91,14 @@ class Database:
             """, (user_id, state))
             row = cur.fetchone()
             self.conn.commit()
-            return UserSession(
-                user_id=row[0],
-                state=row[1],
-                created_at=row[2],
-                updated_at=row[3]
-            )
+            if row:
+                return UserSession(
+                    user_id=int(row[0]),
+                    state=str(row[1]),
+                    created_at=row[2],
+                    updated_at=row[3]
+                )
+            return UserSession(user_id=user_id, state=state)
     
     def update_session(self, user_id: int, **kwargs) -> UserSession:
         if not kwargs:
@@ -120,12 +121,14 @@ class Database:
             cur.execute(query, values)
             row = cur.fetchone()
             self.conn.commit()
-            return UserSession(
-                user_id=row[0],
-                state=row[1],
-                created_at=row[2],
-                updated_at=row[3]
-            )
+            if row:
+                return UserSession(
+                    user_id=int(row[0]),
+                    state=str(row[1]),
+                    created_at=row[2],
+                    updated_at=row[3]
+                )
+        return self.get_session(user_id)
     
     def delete_session(self, user_id: int):
         with self.conn.cursor() as cur:
