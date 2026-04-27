@@ -1,0 +1,18 @@
+# Flask
+flask
+python-telegram-bot
+
+# Database
+psycopg2-binary
+
+# Google Cloud
+google-cloud-speech
+
+# AI
+google-genai
+
+# HTTP
+requests
+
+# Environment
+python-dotenv
