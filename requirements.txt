@@ -1,6 +1,6 @@
 # Web Framework
 flask
-python-telegram-bot
+requests
 
 # Database
 psycopg2-binary
@@ -8,9 +8,6 @@ psycopg2-binary
 # AI
 google-genai
 assemblyai
-
-# HTTP
-requests
 
 # Environment
 python-dotenv
