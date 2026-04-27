@@ -18,7 +18,7 @@ class TranscriptionService:
         logger.info("Initializing AssemblyAI transcription service")
         aai.settings.api_key = config.assemblyai_api_key
         self.transcriber = aai.Transcriber()
-    
+        
     def transcribe_audio(self, audio_data: bytes) -> str:
         try:
             logger.info(f"Transcribing audio: {len(audio_data)} bytes")
@@ -27,7 +27,12 @@ class TranscriptionService:
             upload_url = self.transcriber.upload_file(audio_data)
             logger.info(f"Uploaded to: {upload_url}")
             
-            transcript = self.transcriber.transcribe(upload_url)
+            config = aai.TranscriptionConfig(
+                language_code="ar",
+                speech_models=["universal-2"]
+            )
+            
+            transcript = self.transcriber.transcribe(upload_url, config=config)
             
             if transcript.status == aai.TranscriptStatus.error:
                 error_msg = transcript.error or "Unknown error"
