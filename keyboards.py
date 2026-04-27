@@ -1,6 +1,3 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
-
 def confirmation_keyboard():
     return {
         "inline_keyboard": [
