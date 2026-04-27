@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Dict, Optional
 
-import google.genai as genai
+from google import genai
 
 from config import config
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class ArticleGenerationService:
     def __init__(self):
-        genai.configure(api_key=config.gemini_api_key)
+        self.client = genai.Client(api_key=config.gemini_api_key)
         self.model = "gemini-2.5-pro"
     
     def generate_article(self, transcribed_text: str) -> Dict[str, str]:
@@ -40,7 +40,7 @@ Requirements:
 - Output ONLY valid JSON, no explanations"""
 
         try:
-            response = genai.models.generate_content(
+            response = self.client.models.generate_content(
                 model=self.model,
                 contents=prompt,
                 config={
@@ -54,7 +54,7 @@ Requirements:
             return article
             
         except Exception as e:
-            logger.error(f"Article generation error: {e}")
+            logger.error(f"Article generation error: {e}", exc_info=True)
             raise
 
 
