@@ -1,9 +1,8 @@
 import os
-import json
 import logging
 from datetime import datetime
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional
 
 import psycopg2
 
@@ -42,7 +41,6 @@ class Database:
     
     def _init_tables(self):
         with self.conn.cursor() as cur:
-            # Create table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_sessions (
                     user_id BIGINT PRIMARY KEY,
@@ -60,7 +58,6 @@ class Database:
                 )
             """)
             
-            # Add missing columns if table exists but lacks them
             columns_to_add = [
                 ("title_ar", "TEXT"),
                 ("title_en", "TEXT"),
@@ -83,23 +80,11 @@ class Database:
             cur.execute("SELECT user_id, state, transcribed_text, title_ar, title_en, content_ar, content_en, excerpt_ar, excerpt_en, image_file_id, created_at, updated_at FROM user_sessions WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
             if row:
-                logger.info(f"get_session fetched: user_id={row[0]}, title_ar={row[3]}")
                 return UserSession(
                     user_id=row[0],
                     state=row[1],
                     transcribed_text=row[2],
                     title_ar=row[3],
-                    title_en=row[4],
-                    content_ar=row[5],
-                    content_en=row[6],
-                    excerpt_ar=row[7],
-                    excerpt_en=row[8],
-                    image_file_id=row[9],
-                    created_at=row[10],
-                    updated_at=row[11]
-                )
-            logger.info(f"get_session found no row for user_id={user_id}")
-            return None
                     title_en=row[4],
                     content_ar=row[5],
                     content_en=row[6],
@@ -130,10 +115,7 @@ class Database:
                 )
             return UserSession(user_id=user_id, state=state)
     
-def update_session(self, user_id: int, **kwargs) -> UserSession:
-        import logging
-        logger = logging.getLogger(__name__)
-        
+    def update_session(self, user_id: int, **kwargs) -> UserSession:
         if not kwargs:
             return self.get_session(user_id)
         
@@ -146,18 +128,9 @@ def update_session(self, user_id: int, **kwargs) -> UserSession:
         
         query = f"UPDATE user_sessions SET {', '.join(set_cols)}, updated_at = CURRENT_TIMESTAMP WHERE user_id = %s"
         
-        # Use a fresh cursor for update
         with self.conn.cursor() as cur:
             cur.execute(query, values)
             self.conn.commit()
-            logger.info(f"UPDATE executed, rows: {cur.rowcount}")
-        
-        # Verify directly with a fresh cursor
-        with self.conn.cursor() as cur:
-            cur.execute("SELECT user_id, title_ar, state FROM user_sessions WHERE user_id = %s", (user_id,))
-            row = cur.fetchone()
-            if row:
-                logger.info(f"Direct verify: user_id={row[0]}, title_ar={row[1]}, state={row[2]}")
         
         return self.get_session(user_id)
     
