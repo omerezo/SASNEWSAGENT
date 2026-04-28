@@ -16,7 +16,7 @@ class ArticleGenerationService:
         if not config.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not set in config")
         self.client = genai.Client(api_key=config.gemini_api_key)
-        self.model = "gemini-2.0-flash"
+        self.model = "gemini-2.5-flash"
     
     def generate_article(self, transcribed_text: str) -> Dict[str, str]:
         logger.info(f"Generating article for text: {transcribed_text[:50]}...")
