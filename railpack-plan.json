@@ -1,0 +1,9 @@
+{
+  "build": {
+    "builder": "pip",
+    "pythonVersion": "3.13"
+  },
+  "deploy": {
+    "startCommand": "python main.py"
+  }
+}
