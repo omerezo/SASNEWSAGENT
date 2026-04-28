@@ -1,12 +1,9 @@
 import json
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
 from google import genai
-try:
-    from google.genai import types
-except ImportError:
-    types = None
+from google.genai import types
 
 from config import config
 
@@ -19,9 +16,9 @@ class ArticleGenerationService:
         if not config.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not set in config")
         self.client = genai.Client(api_key=config.gemini_api_key)
-        self.model = "gemini-2.5-flash"
-    
-def generate_article(self, transcribed_text: str) -> Dict[str, str]:
+        self.model = "gemini-2.0-flash"
+
+    def generate_article(self, transcribed_text: str) -> Dict[str, str]:
         prompt = f"""You are a professional sports news writer. Given a voice transcription, create a bilingual (Arabic + English) news article.
 
 TRANSCRIBED TEXT:
@@ -29,75 +26,50 @@ TRANSCRIBED TEXT:
 
 Create a professional news article with EXACTLY this JSON structure (all fields required):
 {{
-    "title_ar": "Arabic headline (arabic text only)",
+    "title_ar": "Arabic headline",
     "title_en": "English headline",
-    "content_ar": "Arabic article body in Arabic (arabic text only, 2-3 paragraphs)",
-    "content_en": "English article body (same content, 2-3 paragraphs)",
-    "excerpt_ar": "Arabic excerpt (arabic text only)",
-    "excerpt_en": "English excerpt"
+    "content_ar": "Arabic article body (2-3 paragraphs, Arabic script only)",
+    "content_en": "English article body (2-3 paragraphs)",
+    "excerpt_ar": "Arabic excerpt (1-2 sentences, Arabic script only)",
+    "excerpt_en": "English excerpt (1-2 sentences)"
 }}
 
-IMPORTANT: Write ALL Arabic fields in Arabic script, NOT English transliteration.
-Output ONLY valid JSON, no explanations."""
+Requirements:
+- Write ALL Arabic fields in Arabic script, NOT transliteration
+- Keep titles under 100 characters
+- Content should be 150-300 words per language
+- Output ONLY valid JSON, no markdown, no explanations"""
 
         try:
-            logger.info(f"Generating article for text: {transcribed_text[:100]}...")
-            
-            generate_config = None
-            if types:
-                generate_config = types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.7,
-                )
-            else:
-                generate_config = {
-                    "response_mime_type": "application/json",
-                    "temperature": 0.7,
-                }
-
             response = self.client.models.generate_content(
                 model=self.model,
                 contents=prompt,
-                config=generate_config
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.7,
+                ),
             )
 
             if not response or not response.text:
-                logger.error(f"Empty response from Gemini API. Response: {response}")
-                raise Exception("Empty response from Gemini API")
+                raise ValueError("Empty response from Gemini API")
 
-            text = response.text
-            logger.info(f"Raw response text: {text}")
+            text = response.text.strip()
 
             # Strip markdown fences if the model wrapped the JSON
-            if text and text.strip().startswith("```"):
-                text = text.strip()
-                # Find the first and last triple backticks
-                first_idx = text.find("```")
-                last_idx = text.rfind("```")
-                
-                # Extract content between fences
-                content = text[first_idx+3:last_idx].strip()
-                if content.startswith("json"):
-                    content = content[4:].strip()
-                text = content
+            if text.startswith("```"):
+                text = text.split("```", 2)[1]
+                if text.startswith("json"):
+                    text = text[4:]
+                text = text.rsplit("```", 1)[0].strip()
 
-            try:
-                article = json.loads(text)
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error: {e}. Raw text: {text}")
-                # Try a more aggressive cleanup if simple strip failed
-                raise
+            article = json.loads(text)
 
-            # Validate required keys
             required_keys = ["title_ar", "title_en", "content_ar", "content_en", "excerpt_ar", "excerpt_en"]
-            missing_keys = [k for k in required_keys if k not in article]
-            if missing_keys:
-                logger.warning(f"Missing keys in generated article: {missing_keys}")
-                # Provide defaults for missing keys to avoid KeyError later
-                for k in missing_keys:
-                    article[k] = f"Missing {k}"
+            for k in required_keys:
+                if k not in article:
+                    article[k] = ""
 
-            logger.info(f"Generated article: {article.get('title_ar', 'N/A')[:50]}...")
+            logger.info(f"Generated article: {article.get('title_en', 'N/A')[:60]}")
             return article
 
         except Exception as e:

@@ -1,7 +1,6 @@
 import os
-import asyncio
+import base64
 import logging
-import io
 import json
 import requests
 
@@ -266,7 +265,7 @@ def handle_post_news(user_id: int, session, db):
             "content_en": session.content_en,
             "excerpt_ar": session.excerpt_ar,
             "excerpt_en": session.excerpt_en,
-            "image": f"data:image/jpeg;base64,{photo_data.hex()}",
+            "image": f"data:image/jpeg;base64,{base64.b64encode(photo_data).decode()}",
         }
         
         website_api = get_website_api()
@@ -308,7 +307,7 @@ def post_article_from_message(user_id: int, file_id: str, session, db):
             "content_en": session.content_en,
             "excerpt_ar": session.excerpt_ar,
             "excerpt_en": session.excerpt_en,
-            "image": f"data:image/jpeg;base64,{photo_data.hex()}",
+            "image": f"data:image/jpeg;base64,{base64.b64encode(photo_data).decode()}",
         }
         
         website_api = get_website_api()
