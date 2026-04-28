@@ -80,14 +80,26 @@ class Database:
     
     def get_session(self, user_id: int) -> Optional[UserSession]:
         with self.conn.cursor() as cur:
-            cur.execute("SELECT * FROM user_sessions WHERE user_id = %s", (user_id,))
+            cur.execute("SELECT user_id, state, transcribed_text, title_ar, title_en, content_ar, content_en, excerpt_ar, excerpt_en, image_file_id, created_at, updated_at FROM user_sessions WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
             if row:
+                logger.info(f"get_session fetched: user_id={row[0]}, title_ar={row[3]}")
                 return UserSession(
                     user_id=row[0],
                     state=row[1],
                     transcribed_text=row[2],
                     title_ar=row[3],
+                    title_en=row[4],
+                    content_ar=row[5],
+                    content_en=row[6],
+                    excerpt_ar=row[7],
+                    excerpt_en=row[8],
+                    image_file_id=row[9],
+                    created_at=row[10],
+                    updated_at=row[11]
+                )
+            logger.info(f"get_session found no row for user_id={user_id}")
+            return None
                     title_en=row[4],
                     content_ar=row[5],
                     content_en=row[6],
@@ -118,7 +130,8 @@ class Database:
                 )
             return UserSession(user_id=user_id, state=state)
     
-    def update_session(self, user_id: int, **kwargs) -> UserSession:
+def update_session(self, user_id: int, **kwargs) -> UserSession:
+        import logging
         logger = logging.getLogger(__name__)
         
         if not kwargs:
@@ -133,17 +146,20 @@ class Database:
         
         query = f"UPDATE user_sessions SET {', '.join(set_cols)}, updated_at = CURRENT_TIMESTAMP WHERE user_id = %s"
         
+        # Use a fresh cursor for update
         with self.conn.cursor() as cur:
             cur.execute(query, values)
             self.conn.commit()
-            logger.info(f"UPDATE executed. rows affected: {cur.rowcount}, user_id: {user_id}, kwargs: {kwargs}")
+            logger.info(f"UPDATE executed, rows: {cur.rowcount}")
         
-        session = self.get_session(user_id)
-        if session:
-            logger.info(f"get_session after update returned title_ar: {session.title_ar}")
-        else:
-            logger.error(f"get_session returned None for user_id {user_id}")
-        return session
+        # Verify directly with a fresh cursor
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT user_id, title_ar, state FROM user_sessions WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            if row:
+                logger.info(f"Direct verify: user_id={row[0]}, title_ar={row[1]}, state={row[2]}")
+        
+        return self.get_session(user_id)
     
     def delete_session(self, user_id: int):
         with self.conn.cursor() as cur:
