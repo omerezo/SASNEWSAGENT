@@ -162,6 +162,8 @@ def handle_photo_message(user_id: int, photos: list, session, db):
     photo = photos[-1]
     db.update_session(user_id, image_file_id=photo["file_id"], state="waiting_post")
     
+    # Re-fetch session to get article data
+    session = db.get_session(user_id)
     post_article_from_message(user_id, photo["file_id"], session, db)
 
 
