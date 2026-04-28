@@ -119,6 +119,8 @@ class Database:
             return UserSession(user_id=user_id, state=state)
     
     def update_session(self, user_id: int, **kwargs) -> UserSession:
+        logger = logging.getLogger(__name__)
+        
         if not kwargs:
             return self.get_session(user_id)
         
@@ -129,16 +131,19 @@ class Database:
             values.append(value)
         values.append(user_id)
         
-        query = f"""
-            UPDATE user_sessions 
-            SET {', '.join(set_cols)}, updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = %s
-        """
+        query = f"UPDATE user_sessions SET {', '.join(set_cols)}, updated_at = CURRENT_TIMESTAMP WHERE user_id = %s"
+        
         with self.conn.cursor() as cur:
             cur.execute(query, values)
             self.conn.commit()
+            logger.info(f"UPDATE executed. rows affected: {cur.rowcount}, user_id: {user_id}, kwargs: {kwargs}")
         
-        return self.get_session(user_id)
+        session = self.get_session(user_id)
+        if session:
+            logger.info(f"get_session after update returned title_ar: {session.title_ar}")
+        else:
+            logger.error(f"get_session returned None for user_id {user_id}")
+        return session
     
     def delete_session(self, user_id: int):
         with self.conn.cursor() as cur:
