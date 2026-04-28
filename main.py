@@ -30,7 +30,10 @@ def send_message(chat_id: int, text: str, reply_markup=None):
     data = {"chat_id": chat_id, "text": text}
     if reply_markup:
         data["reply_markup"] = reply_markup
-    requests.post(f"{TELEGRAM_API}/sendMessage", json=data)
+    try:
+        requests.post(f"{TELEGRAM_API}/sendMessage", json=data, timeout=10)
+    except Exception as e:
+        logging.error(f"send_message error: {e}")
 
 
 def answer_callback_query(callback_query_id: str, text: str = None):
@@ -81,37 +84,38 @@ def root():
 def handle_message(msg: dict):
     try:
         user_id = msg["from"]["id"]
-        
-        # Check if it's a group chat
         chat_id = msg.get("chat", {}).get("id")
         is_group = chat_id and chat_id != user_id
+        target_chat = chat_id  # Use chat_id for responses (group or private)
+        
+        logger.info(f"Message: user={user_id}, chat={chat_id}, is_group={is_group}")
         
         if is_group:
-            # In groups, need to mention bot or respond to its messages
-            # Check if bot was mentioned or it's a reply to bot message
             text = msg.get("text", "")
             entities = msg.get("entities", [])
+            mentioned = any(ent.get("type") in ["mention", "bot_command"] for ent in entities)
+            is_reply = msg.get("reply_to_message", {}).get("from", {}).get("is_bot") if msg.get("reply_to_message") else False
             
-            # Check for bot mention in entities
-            mentioned = False
-            for ent in entities:
-                if ent.get("type") == "mention":  # @username
-                    mentioned = True
-                elif ent.get("type") == "bot_command":  # /command
-                    mentioned = True
-            
-            # Check if message is a reply to bot
-            reply = msg.get("reply_to_message", {})
-            is_reply_to_bot = False
-            if reply:
-                from_user = reply.get("from", {})
-                if from_user and from_user.get("is_bot"):
-                    is_reply_to_bot = True
-            
-            if not mentioned and not is_reply_to_bot:
+            if text and not mentioned and not is_reply:
                 return
         
         db = get_db()
+        session = db.get_session(user_id)
+        
+        if not session:
+            session = db.create_session(user_id, "waiting_voice")
+        
+        if "voice" in msg:
+            handle_voice_message(user_id, target_chat, msg["voice"], session, db)
+        elif "text" in msg:
+            handle_text_message(user_id, target_chat, msg["text"], session, db)
+        elif "photo" in msg:
+            handle_photo_message(user_id, target_chat, msg["photo"], session, db)
+        else:
+            send_message(target_chat, "Please send a voice note to create a news article.")
+    except Exception as e:
+        logger.error(f"handle_message error: {e}", exc_info=True)
+        send_message(chat_id, f"❌ Error: {str(e)}")
         session = db.get_session(user_id)
         
         if not session:
@@ -132,15 +136,15 @@ def handle_message(msg: dict):
             send_message(user_id, f"❌ Error: {str(e)}")
 
 
-def handle_voice_message(user_id: int, voice: dict, session, db):
+def handle_voice_message(user_id: int, chat_id: int, voice: dict, session, db):
     try:
-        send_message(user_id, "🎤 Processing your voice note...")
+        send_message(chat_id, "🎤 Processing your voice note...")
         
         file_info = get_file(voice["file_id"])
         file_path = file_info.get("file_path")
         
         if not file_path:
-            send_message(user_id, "❌ Could not download audio.")
+            send_message(chat_id, "❌ Could not download audio.")
             return
         
         audio_data = download_file(file_path)
@@ -150,29 +154,42 @@ def handle_voice_message(user_id: int, voice: dict, session, db):
         transcribed_text = transcription_service.transcribe_audio(audio_data)
         
         if not transcribed_text:
-            send_message(user_id, "❌ Could not understand the audio. Please try again.")
+            send_message(chat_id, "❌ Could not understand the audio. Please try again.")
             return
         
         db.update_session(user_id, transcribed_text=transcribed_text, state="waiting_confirmation")
         
         send_message(
-            user_id,
+            chat_id,
             f"📝 You said:\n\n\"{transcribed_text}\"\n\nIs this correct?",
             reply_markup=confirmation_keyboard()
         )
         
     except Exception as e:
         logger.error(f"Voice processing error: {e}", exc_info=True)
-        send_message(user_id, "❌ Error processing voice. Please try again.")
+        send_message(chat_id, "❌ Error processing voice. Please try again.")
 
 
-def handle_text_message(user_id: int, text: str, session, db):
+def handle_text_message(user_id: int, chat_id: int, text: str, session, db):
     text_lower = text.lower()
     
     if text_lower in ["/start", "/restart"]:
         db.delete_session(user_id)
         db.create_session(user_id, "waiting_voice")
-        send_message(user_id, "🎤 Send me a voice note to create a news article.")
+        send_message(chat_id, "🎤 Send me a voice note to create a news article.")
+    elif text_lower in ["/cancel", "cancel"]:
+        db.delete_session(user_id)
+        send_message(chat_id, "❌ Cancelled. Send a voice note to start again.")
+    elif session.state == "editing_text":
+        db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
+        send_message(chat_id, f"📝 You said:\n\n\"{text}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
+    elif session.state == "editing_article":
+        send_message(chat_id, "📝 Click ✅ Yes to proceed with current article.")
+    elif session.state == "waiting_confirmation":
+        db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
+        send_message(chat_id, f"📝 You said:\n\n\"{text}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
+    else:
+        send_message(chat_id, "🎤 Send me a voice note to create a news article.")
     elif text_lower in ["/cancel", "cancel"]:
         db.delete_session(user_id)
         send_message(user_id, "❌ Cancelled. Send a voice note to start again.")
