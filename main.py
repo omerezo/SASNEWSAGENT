@@ -82,14 +82,33 @@ def handle_message(msg: dict):
     try:
         user_id = msg["from"]["id"]
         
-        # Check if it's a group chat (chat_id == user_id means private)
+        # Check if it's a group chat
         chat_id = msg.get("chat", {}).get("id")
         is_group = chat_id and chat_id != user_id
         
         if is_group:
-            # In groups, only respond to commands that mention the bot
+            # In groups, need to mention bot or respond to its messages
+            # Check if bot was mentioned or it's a reply to bot message
             text = msg.get("text", "")
-            if not text or not text.startswith("/"):
+            entities = msg.get("entities", [])
+            
+            # Check for bot mention in entities
+            mentioned = False
+            for ent in entities:
+                if ent.get("type") == "mention":  # @username
+                    mentioned = True
+                elif ent.get("type") == "bot_command":  # /command
+                    mentioned = True
+            
+            # Check if message is a reply to bot
+            reply = msg.get("reply_to_message", {})
+            is_reply_to_bot = False
+            if reply:
+                from_user = reply.get("from", {})
+                if from_user and from_user.get("is_bot"):
+                    is_reply_to_bot = True
+            
+            if not mentioned and not is_reply_to_bot:
                 return
         
         db = get_db()
