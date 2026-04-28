@@ -1,64 +1,66 @@
 import os
 import base64
 import logging
-import json
 import requests
-
 from flask import Flask, request, jsonify
-
 from config import config
-from db import get_db, Database
-from keyboards import confirmation_keyboard, post_keyboard, cancel_keyboard
-from services.transcription import get_transcription_service
-from services.article import get_article_service
-from services.website import get_website_api
+from db import get_db
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-
 app = Flask(__name__)
-
 TELEGRAM_API = f"https://api.telegram.org/bot{config.telegram_token}"
 
 
-def send_message(chat_id: int, text: str, reply_markup=None):
+def send_message(chat_id, text, reply_markup=None):
     data = {"chat_id": chat_id, "text": text}
     if reply_markup:
         data["reply_markup"] = reply_markup
     try:
         requests.post(f"{TELEGRAM_API}/sendMessage", json=data, timeout=10)
     except Exception as e:
-        logging.error(f"send_message error: {e}")
+        logger.error(f"send_message error: {e}")
 
 
-def answer_callback_query(callback_query_id: str, text: str = None):
-    data = {"callback_query_id": callback_query_id}
+def answer_callback_query(query_id, text=None):
+    data = {"callback_query_id": query_id}
     if text:
         data["text"] = text
     requests.post(f"{TELEGRAM_API}/answerCallbackQuery", json=data)
 
 
-def get_file(file_id: str):
+def get_file(file_id):
     resp = requests.post(f"{TELEGRAM_API}/getFile", json={"file_id": file_id})
     return resp.json().get("result", {})
 
 
-def download_file(file_path: str):
+def download_file(file_path):
     resp = requests.get(f"https://api.telegram.org/file/bot{config.telegram_token}/{file_path}")
     return resp.content
 
 
+# Keyboards
+def confirmation_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "✏️ Edit", "callback_data": "edit_text"}],
+        [{"text": "✅ Yes", "callback_data": "confirm_yes"}],
+        [{"text": "❌ No", "callback_data": "confirm_no"}]
+    ]}
+
+
+def post_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "📸 Post with Image", "callback_data": "post_news"}]
+    ]}
+
+
+# Routes
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
         data = request.get_json(force=True)
         update_id = data.get("update_id", 0)
-        logger.info(f"Received update: {update_id}")
         
         if "callback_query" in data:
             handle_callback(data["callback_query"])
@@ -78,15 +80,16 @@ def health():
 
 @app.route("/", methods=["GET", "POST"])
 def root():
-    return jsonify({"status": "ok", "service": "SAS News Agent"})
+    return jsonify({"status": "ok"})
 
 
-def handle_message(msg: dict):
+# Handlers
+def handle_message(msg):
     try:
         user_id = msg["from"]["id"]
         chat_id = msg.get("chat", {}).get("id")
         is_group = chat_id and chat_id != user_id
-        target_chat = chat_id  # Use chat_id for responses (group or private)
+        target_chat = chat_id
         
         logger.info(f"Message: user={user_id}, chat={chat_id}, is_group={is_group}")
         
@@ -101,154 +104,75 @@ def handle_message(msg: dict):
         
         db = get_db()
         session = db.get_session(user_id)
-        
         if not session:
             session = db.create_session(user_id, "waiting_voice")
         
         if "voice" in msg:
-            handle_voice_message(user_id, target_chat, msg["voice"], session, db)
+            handle_voice(user_id, target_chat, msg["voice"], session, db)
         elif "text" in msg:
-            handle_text_message(user_id, target_chat, msg["text"], session, db)
+            handle_text(user_id, target_chat, msg["text"], session, db)
         elif "photo" in msg:
-            handle_photo_message(user_id, target_chat, msg["photo"], session, db)
-        else:
-            send_message(target_chat, "Please send a voice note to create a news article.")
+            handle_photo(user_id, target_chat, msg["photo"], session, db)
     except Exception as e:
         logger.error(f"handle_message error: {e}", exc_info=True)
-        send_message(chat_id, f"❌ Error: {str(e)}")
-        session = db.get_session(user_id)
-        
-        if not session:
-            session = db.create_session(user_id, "waiting_voice")
-        
-        if "voice" in msg:
-            handle_voice_message(user_id, msg["voice"], session, db)
-        elif "text" in msg:
-            handle_text_message(user_id, msg["text"], session, db)
-        elif "photo" in msg:
-            handle_photo_message(user_id, msg["photo"], session, db)
-        else:
-            send_message(user_id, "Please send a voice note to create a news article.")
-    except Exception as e:
-        logger.error(f"handle_message error: {e}", exc_info=True)
-        user_id = msg.get("from", {}).get("id")
-        if user_id:
-            send_message(user_id, f"❌ Error: {str(e)}")
 
 
-def handle_voice_message(user_id: int, chat_id: int, voice: dict, session, db):
+def handle_voice(user_id, chat_id, voice, session, db):
     try:
-        send_message(chat_id, "🎤 Processing your voice note...")
-        
+        send_message(chat_id, "🎤 Processing...")
         file_info = get_file(voice["file_id"])
         file_path = file_info.get("file_path")
-        
         if not file_path:
             send_message(chat_id, "❌ Could not download audio.")
             return
         
         audio_data = download_file(file_path)
-        logger.info(f"Downloaded audio: {len(audio_data)} bytes")
+        from services.transcription import get_transcription_service
+        transcribed = get_transcription_service().transcribe_audio(audio_data)
         
-        transcription_service = get_transcription_service()
-        transcribed_text = transcription_service.transcribe_audio(audio_data)
-        
-        if not transcribed_text:
-            send_message(chat_id, "❌ Could not understand the audio. Please try again.")
+        if not transcribed:
+            send_message(chat_id, "❌ Could not understand.")
             return
         
-        db.update_session(user_id, transcribed_text=transcribed_text, state="waiting_confirmation")
-        
-        send_message(
-            chat_id,
-            f"📝 You said:\n\n\"{transcribed_text}\"\n\nIs this correct?",
-            reply_markup=confirmation_keyboard()
-        )
-        
+        db.update_session(user_id, transcribed_text=transcribed, state="waiting_confirmation")
+        send_message(chat_id, f"📝 You said:\n\n\"{transcribed}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
     except Exception as e:
-        logger.error(f"Voice processing error: {e}", exc_info=True)
-        send_message(chat_id, "❌ Error processing voice. Please try again.")
+        logger.error(f"Voice error: {e}")
+        send_message(chat_id, "❌ Error processing voice.")
 
 
-def handle_text_message(user_id: int, chat_id: int, text: str, session, db):
+def handle_text(user_id, chat_id, text, session, db):
     text_lower = text.lower()
     
     if text_lower in ["/start", "/restart"]:
         db.delete_session(user_id)
         db.create_session(user_id, "waiting_voice")
-        send_message(chat_id, "🎤 Send me a voice note to create a news article.")
+        send_message(chat_id, "🎤 Send me a voice note.")
     elif text_lower in ["/cancel", "cancel"]:
         db.delete_session(user_id)
-        send_message(chat_id, "❌ Cancelled. Send a voice note to start again.")
+        send_message(chat_id, "❌ Cancelled.")
     elif session.state == "editing_text":
         db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
         send_message(chat_id, f"📝 You said:\n\n\"{text}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
-    elif session.state == "editing_article":
-        send_message(chat_id, "📝 Click ✅ Yes to proceed with current article.")
     elif session.state == "waiting_confirmation":
         db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
         send_message(chat_id, f"📝 You said:\n\n\"{text}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
     else:
-        send_message(chat_id, "🎤 Send me a voice note to create a news article.")
-    elif text_lower in ["/cancel", "cancel"]:
-        db.delete_session(user_id)
-        send_message(user_id, "❌ Cancelled. Send a voice note to start again.")
-    elif session.state == "editing_text":
-        db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
-        send_message(
-            user_id,
-            f"📝 You said:\n\n\"{text}\"\n\nIs this correct?",
-            reply_markup=confirmation_keyboard()
-        )
-    elif session.state == "editing_article":
-        # Parse edited article
-        lines = text.split("---")
-        if len(lines) >= 4:
-            # Try to extract title/content
-            ar_title = ""
-            ar_content = ""
-            en_title = ""
-            en_content = ""
-            
-            for part in lines:
-                if "arabic title:" in part.lower():
-                    ar_title = part.split(":", 1)[1].strip()
-                elif "arabic content:" in part.lower():
-                    ar_content = part.split(":", 1)[1].strip()
-                elif "english title:" in part.lower():
-                    en_title = part.split(":", 1)[1].strip()
-                elif "english content:" in part.lower():
-                    en_content = part.split(":", 1)[1].strip()
-            
-            if ar_title and ar_content:
-                db.update_session(user_id, title_ar=ar_title, content_ar=ar_content, title_en=en_title or session.title_en, content_en=en_content or session.content_en, state="waiting_post")
-                send_message(user_id, "✅ Article updated! Click 📸 Post to publish.")
-                return
-        
-        send_message(user_id, "📝 Format not recognized. Using current article. Click 📸 Post to publish.")
-    elif session.state == "waiting_confirmation":
-        db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
-        send_message(
-            user_id,
-            f"📝 You said:\n\n\"{text}\"\n\nIs this correct?",
-            reply_markup=confirmation_keyboard()
-        )
-    else:
-        send_message(user_id, "🎤 Send me a voice note to create a news article.")
+        send_message(chat_id, "🎤 Send me a voice note.")
 
 
-def handle_photo_message(user_id: int, photos: list, session, db):
+def handle_photo(user_id, chat_id, photos, session, db):
     if session.state != "waiting_post" or not session.title_ar:
-        send_message(user_id, "Please confirm the article first by clicking Yes button, then Post.")
+        send_message(chat_id, "Please confirm article first.")
         return
     
     photo = photos[-1]
-    db.update_session(user_id, image_file_id=photo["file_id"], state="waiting_post")
+    db.update_session(user_id, image_file_id=photo["file_id"])
     session = db.get_session(user_id)
-    post_article_from_message(user_id, photo["file_id"], session, db)
+    post_article(user_id, chat_id, photo["file_id"], session, db)
 
 
-def handle_callback(callback: dict):
+def handle_callback(callback):
     user_id = callback["from"]["id"]
     data = callback["data"]
     query_id = callback["id"]
@@ -259,120 +183,46 @@ def handle_callback(callback: dict):
     session = db.get_session(user_id)
     
     if not session:
-        send_message(user_id, "Session expired. Send /start to begin.")
+        send_message(user_id, "Session expired.")
         return
     
     if data == "edit_text":
-        handle_edit_text(user_id, session, db)
-    elif data == "edit_article":
-        handle_edit_article(user_id, session, db)
+        send_message(user_id, f"✏️ Current:\n{session.transcribed_text}\n\nSend corrected:")
+        db.update_session(user_id, state="editing_text")
     elif data == "confirm_yes":
-        handle_confirmation_yes(user_id, session, db)
+        handle_confirm_yes(user_id, session, db)
     elif data == "confirm_no":
-        handle_confirmation_no(user_id, session, db)
+        send_message(user_id, "❌ Send voice note again.")
+        db.update_session(user_id, state="waiting_voice")
     elif data == "post_news":
-        handle_post_news(user_id, session, db)
-    elif data == "action_cancel":
-        db.delete_session(user_id)
-        send_message(user_id, "❌ Cancelled. Send a voice note to start again.")
+        send_message(user_id, "📸 Send an image.")
 
 
-def handle_edit_text(user_id: int, session, db):
-    current = session.transcribed_text or ""
-    send_message(user_id, f"✏️ Current text:\n\n{current}\n\nSend the corrected version:")
-    db.update_session(user_id, state="editing_text")
-
-
-def handle_edit_article(user_id: int, session, db):
-    # Send article in parts for easier editing
-    msg = f"✏️ *Arabic Title:*\n{session.title_ar}\n\n*Arabic Content:*\n{session.content_ar[:500]}"
-    if len(session.content_ar) > 500:
-        msg += f"\n... (continued)"
-    send_message(user_id, msg)
-    
-    msg2 = f"*English Title:*\n{session.title_en}\n\n*English Content:*\n{session.content_en[:500]}"
-    if len(session.content_en) > 500:
-        msg2 += f"\n... (continued)"
-    send_message(user_id, msg2)
-    
-    send_message(user_id, "📝 Send the corrected version in format:\n---\nArabic title:\n[title]\nContent:\n[content]\n---\nEnglish title:\n[title]\nContent:\n[content]")
-    db.update_session(user_id, state="editing_article")
-    db.update_session(user_id, state="editing_article")
-
-
-def handle_confirmation_yes(user_id: int, session, db):
-    send_message(user_id, "✍️ Creating your article...")
-    
+def handle_confirm_yes(user_id, session, db):
     try:
-        article_service = get_article_service()
-        article = article_service.generate_article(session.transcribed_text)
+        send_message(user_id, "✍️ Creating article...")
+        from services.article import get_article_service
+        article = get_article_service().generate_article(session.transcribed_text)
         
-        logger.info(f"Saving article: title_ar={article.get('title_ar')[:30]}, content_ar={article.get('content_ar')[:30] if article.get('content_ar') else 'None'}")
-        
-        db.update_session(
-            user_id,
+        db.update_session(user_id,
             title_ar=article.get("title_ar"),
             title_en=article.get("title_en"),
             content_ar=article.get("content_ar"),
             content_en=article.get("content_en"),
             excerpt_ar=article.get("excerpt_ar"),
             excerpt_en=article.get("excerpt_en"),
-            state="waiting_post"
-        )
+            state="waiting_post")
         
-        # Verify save
-        new_session = db.get_session(user_id)
-        logger.info(f"After save: title_ar={new_session.title_ar}")
-        
-        article_text = f"""📰 {article['title_ar']}
-
-{article['content_ar']}
-
----
-
-📰 {article['title_en']}
-
-{article['content_en']}
-
----
-
-✅ Click '📸 Post' to publish with an image, or send an image now."""
-        
-        send_message(user_id, article_text, reply_markup=post_keyboard())
-        
+        send_message(user_id, f"📰 {article['title_ar']}\n{article['content_ar'][:200]}...\n\n📰 {article['title_en']}\n{article['content_en'][:200]}...", reply_markup=post_keyboard())
     except Exception as e:
-        logger.error(f"Article generation error: {e}", exc_info=True)
-        send_message(user_id, "❌ Error generating article. Please try again.")
+        logger.error(f"Article error: {e}")
+        send_message(user_id, "❌ Error generating article.")
 
 
-def handle_confirmation_no(user_id: int, session, db):
-    send_message(
-        user_id,
-        "❌ Please send the voice note again or type your message.",
-        reply_markup=cancel_keyboard()
-    )
-    
-    db.update_session(user_id, state="waiting_voice")
-
-
-def handle_post_news(user_id: int, session, db):
-    # Ask for new image - wait for user's photo
-    send_message(user_id, "📸 Please send an image to include with the article.")
-
-
-def post_article_from_message(user_id: int, file_id: str, session, db):
-    logger.info(f"post_article_from_message called. session.title_ar={session.title_ar}")
-    
-    if not session.title_ar:
-        logger.error(f"Session data: title_ar={session.title_ar}, title_en={session.title_en}, content_ar={session.content_ar}")
-        send_message(user_id, "No article to post. Please start over.")
-        return
-    
+def post_article(user_id, chat_id, file_id, session, db):
     try:
         file_info = get_file(file_id)
         photo_data = download_file(file_info.get("file_path"))
-        
-        logger.info(f"Preparing article: title_ar={session.title_ar[:30]}...")
         
         article = {
             "title_ar": session.title_ar,
@@ -384,22 +234,19 @@ def post_article_from_message(user_id: int, file_id: str, session, db):
             "image": f"data:image/jpeg;base64,{base64.b64encode(photo_data).decode()}",
         }
         
-        website_api = get_website_api()
-        result = website_api.post_news(article)
+        from services.website import get_website_api
+        result = get_website_api().post_news(article)
         
         if result.get("success"):
             news_id = result.get("id")
             url = f"{config.website_base_url}/news/{news_id}"
-            
-            send_message(user_id, f"✅ Live!\n\nLink: {url}")
-            
+            send_message(chat_id, f"✅ Live!\n{url}")
             db.delete_session(user_id)
         else:
-            send_message(user_id, "❌ Failed to post. Please try again.")
-            
+            send_message(chat_id, "❌ Failed to post.")
     except Exception as e:
-        logger.error(f"Post error: {e}")
-        send_message(user_id, "❌ Error posting article. Please try again.")
+        logger.error(f"Post error: {e}", exc_info=True)
+        send_message(chat_id, "❌ Error posting.")
 
 
 if __name__ == "__main__":
