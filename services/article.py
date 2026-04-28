@@ -21,32 +21,24 @@ class ArticleGenerationService:
         self.client = genai.Client(api_key=config.gemini_api_key)
         self.model = "gemini-2.5-flash"
     
-    def generate_article(self, transcribed_text: str) -> Dict[str, str]:
-        if not transcribed_text:
-            raise ValueError("Transcribed text is empty")
-
+def generate_article(self, transcribed_text: str) -> Dict[str, str]:
         prompt = f"""You are a professional sports news writer. Given a voice transcription, create a bilingual (Arabic + English) news article.
 
 TRANSCRIBED TEXT:
 {transcribed_text}
 
-Create a professional news article with the following JSON structure:
+Create a professional news article with EXACTLY this JSON structure (all fields required):
 {{
-    "title_ar": "Arabic headline (concise, compelling)",
+    "title_ar": "Arabic headline (arabic text only)",
     "title_en": "English headline",
-    "content_ar": "Arabic article body (2-3 paragraphs, professional news style)",
-    "content_en": "English article body (same content, professional translation)",
-    "excerpt_ar": "Arabic excerpt (1-2 sentences for preview)",
+    "content_ar": "Arabic article body in Arabic (arabic text only, 2-3 paragraphs)",
+    "content_en": "English article body (same content, 2-3 paragraphs)",
+    "excerpt_ar": "Arabic excerpt (arabic text only)",
     "excerpt_en": "English excerpt"
 }}
 
-Requirements:
-- Be professional and news-like
-- Extract the key facts from the transcription
-- Write in Arabic first, then translate professionally to English
-- Keep titles under 100 characters
-- Content should be 150-300 words
-- Output ONLY valid JSON, no explanations"""
+IMPORTANT: Write ALL Arabic fields in Arabic script, NOT English transliteration.
+Output ONLY valid JSON, no explanations."""
 
         try:
             logger.info(f"Generating article for text: {transcribed_text[:100]}...")
