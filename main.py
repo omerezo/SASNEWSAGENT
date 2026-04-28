@@ -206,6 +206,8 @@ def handle_confirmation_yes(user_id: int, session, db):
         article_service = get_article_service()
         article = article_service.generate_article(session.transcribed_text)
         
+        logger.info(f"Saving article: title_ar={article.get('title_ar')[:30]}, content_ar={article.get('content_ar')[:30] if article.get('content_ar') else 'None'}")
+        
         db.update_session(
             user_id,
             title_ar=article.get("title_ar"),
@@ -216,6 +218,10 @@ def handle_confirmation_yes(user_id: int, session, db):
             excerpt_en=article.get("excerpt_en"),
             state="waiting_post"
         )
+        
+        # Verify save
+        new_session = db.get_session(user_id)
+        logger.info(f"After save: title_ar={new_session.title_ar}")
         
         article_text = f"""📰 {article['title_ar']}
 
