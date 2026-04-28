@@ -33,11 +33,17 @@ class WebsiteAPIService:
         }
         
         try:
+            logger.info(f"Posting to {url}")
             response = requests.post(url, json=payload, headers=headers, timeout=30)
+            logger.info(f"Response status: {response.status_code}")
+            logger.info(f"Response body: {response.text}")
             response.raise_for_status()
             result = response.json()
             logger.info(f"Posted news: {result.get('id')}")
             return result
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Website API HTTP error: {e} - {response.text}")
+            raise
         except Exception as e:
             logger.error(f"Website API error: {e}")
             raise

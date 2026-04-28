@@ -74,6 +74,11 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/", methods=["GET", "POST"])
+def root():
+    return jsonify({"status": "ok", "service": "SAS News Agent"})
+
+
 def handle_message(msg: dict):
     try:
         user_id = msg["from"]["id"]
