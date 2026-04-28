@@ -284,13 +284,18 @@ def handle_post_news(user_id: int, session, db):
 
 
 def post_article_from_message(user_id: int, file_id: str, session, db):
+    logger.info(f"post_article_from_message called. session.title_ar={session.title_ar}")
+    
     if not session.title_ar:
+        logger.error(f"Session data: title_ar={session.title_ar}, title_en={session.title_en}, content_ar={session.content_ar}")
         send_message(user_id, "No article to post. Please start over.")
         return
     
     try:
         file_info = get_file(file_id)
         photo_data = download_file(file_info.get("file_path"))
+        
+        logger.info(f"Preparing article: title_ar={session.title_ar[:30]}...")
         
         article = {
             "title_ar": session.title_ar,
