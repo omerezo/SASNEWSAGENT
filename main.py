@@ -287,40 +287,8 @@ def handle_confirmation_no(user_id: int, session, db):
 
 
 def handle_post_news(user_id: int, session, db):
-    # Ask for new image - don't try to use existing one
+    # Ask for new image - wait for user's photo
     send_message(user_id, "📸 Please send an image to include with the article.")
-    # State stays as waiting_post - will be handled when user sends photo
-    
-    try:
-        file_info = get_file(session.image_file_id)
-        photo_data = download_file(file_info.get("file_path"))
-        
-        article = {
-            "title_ar": session.title_ar,
-            "title_en": session.title_en,
-            "content_ar": session.content_ar,
-            "content_en": session.content_en,
-            "excerpt_ar": session.excerpt_ar,
-            "excerpt_en": session.excerpt_en,
-            "image": f"data:image/jpeg;base64,{base64.b64encode(photo_data).decode()}",
-        }
-        
-        website_api = get_website_api()
-        result = website_api.post_news(article)
-        
-        if result.get("success"):
-            news_id = result.get("id")
-            url = f"{config.website_base_url}/news/{news_id}"
-            
-            send_message(user_id, f"✅ Live!\n\nLink: {url}")
-            
-            db.delete_session(user_id)
-        else:
-            send_message(user_id, "❌ Failed to post. Please try again.")
-            
-    except Exception as e:
-        logger.error(f"Post error: {e}")
-        send_message(user_id, "❌ Error posting article. Please try again.")
 
 
 def post_article_from_message(user_id: int, file_id: str, session, db):
