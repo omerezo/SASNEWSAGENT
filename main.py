@@ -287,9 +287,9 @@ def handle_confirmation_no(user_id: int, session, db):
 
 
 def handle_post_news(user_id: int, session, db):
-    # Clear old image and ask for new one
+    # Ask for new image - don't try to use existing one
     send_message(user_id, "📸 Please send an image to include with the article.")
-    # We don't set image_file_id here - wait for user's photo message
+    # State stays as waiting_post - will be handled when user sends photo
     
     try:
         file_info = get_file(session.image_file_id)
