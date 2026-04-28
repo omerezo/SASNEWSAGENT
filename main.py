@@ -138,15 +138,24 @@ def handle_voice_message(user_id: int, voice: dict, session, db):
 
 
 def handle_text_message(user_id: int, text: str, session, db):
-    text = text.lower()
+    text_lower = text.lower()
     
-    if text in ["/start", "/restart"]:
+    if text_lower in ["/start", "/restart"]:
         db.delete_session(user_id)
         db.create_session(user_id, "waiting_voice")
         send_message(user_id, "🎤 Send me a voice note to create a news article.")
-    elif text in ["/cancel", "cancel"]:
+    elif text_lower in ["/cancel", "cancel"]:
         db.delete_session(user_id)
         send_message(user_id, "❌ Cancelled. Send a voice note to start again.")
+    elif session.state == "editing_text":
+        db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
+        send_message(
+            user_id,
+            f"📝 You said:\n\n\"{text}\"\n\nIs this correct?",
+            reply_markup=confirmation_keyboard()
+        )
+    elif session.state == "editing_article":
+        send_message(user_id, "📝 Please use the Edit Article button to edit. For now, click ✅ Yes to proceed.")
     elif session.state == "waiting_confirmation":
         db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
         send_message(
@@ -159,44 +168,37 @@ def handle_text_message(user_id: int, text: str, session, db):
 
 
 def handle_photo_message(user_id: int, photos: list, session, db):
-    logger.info(f"handle_photo: state={session.state}, title_ar={session.title_ar}")
-    
     if session.state != "waiting_post" or not session.title_ar:
-        logger.error(f"Invalid state or no article. state={session.state}, title_ar={session.title_ar}")
-        send_message(user_id, "Please confirm the article first by clicking Yes button.")
+        send_message(user_id, "Please confirm the article first by clicking Yes button, then Post.")
         return
     
     photo = photos[-1]
     db.update_session(user_id, image_file_id=photo["file_id"], state="waiting_post")
-    
-    # Re-fetch session to get article data
     session = db.get_session(user_id)
     post_article_from_message(user_id, photo["file_id"], session, db)
 
 
-def handle_callback(callback: dict):
-    user_id = callback["from"]["id"]
-    data = callback["data"]
-    query_id = callback["id"]
-    
-    answer_callback_query(query_id)
-    
-    db = get_db()
-    session = db.get_session(user_id)
-    
-    if not session:
-        send_message(user_id, "Session expired. Send /start to begin.")
-        return
-    
-    if data == "confirm_yes":
-        handle_confirmation_yes(user_id, session, db)
-    elif data == "confirm_no":
-        handle_confirmation_no(user_id, session, db)
-    elif data == "post_news":
-        handle_post_news(user_id, session, db)
-    elif data == "action_cancel":
-        db.delete_session(user_id)
-        send_message(user_id, "❌ Cancelled. Send a voice note to start again.")
+def handle_edit_text(user_id: int, session, db):
+    send_message(user_id, "✏️ Please send the corrected text:")
+    db.update_session(user_id, state="editing_text")
+
+
+def handle_edit_article(user_id: int, session, db):
+    article_text = f"""✏️ Edit the article below:
+
+📰 {session.title_ar}
+{session.content_ar}
+
+---
+
+📰 {session.title_en}
+{session.content_en}
+
+---
+
+Send the corrected version."""    
+    send_message(user_id, article_text)
+    db.update_session(user_id, state="editing_article")
 
 
 def handle_confirmation_yes(user_id: int, session, db):
@@ -255,9 +257,9 @@ def handle_confirmation_no(user_id: int, session, db):
 
 
 def handle_post_news(user_id: int, session, db):
-    if not session.image_file_id:
-        send_message(user_id, "📸 Please send an image to include with the article.")
-        return
+    # Clear old image and ask for new one
+    send_message(user_id, "📸 Please send an image to include with the article.")
+    # We don't set image_file_id here - wait for user's photo message
     
     try:
         file_info = get_file(session.image_file_id)
