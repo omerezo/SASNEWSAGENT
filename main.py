@@ -155,7 +155,31 @@ def handle_text_message(user_id: int, text: str, session, db):
             reply_markup=confirmation_keyboard()
         )
     elif session.state == "editing_article":
-        send_message(user_id, "📝 Please use the Edit Article button to edit. For now, click ✅ Yes to proceed.")
+        # Parse edited article
+        lines = text.split("---")
+        if len(lines) >= 4:
+            # Try to extract title/content
+            ar_title = ""
+            ar_content = ""
+            en_title = ""
+            en_content = ""
+            
+            for part in lines:
+                if "arabic title:" in part.lower():
+                    ar_title = part.split(":", 1)[1].strip()
+                elif "arabic content:" in part.lower():
+                    ar_content = part.split(":", 1)[1].strip()
+                elif "english title:" in part.lower():
+                    en_title = part.split(":", 1)[1].strip()
+                elif "english content:" in part.lower():
+                    en_content = part.split(":", 1)[1].strip()
+            
+            if ar_title and ar_content:
+                db.update_session(user_id, title_ar=ar_title, content_ar=ar_content, title_en=en_title or session.title_en, content_en=en_content or session.content_en, state="waiting_post")
+                send_message(user_id, "✅ Article updated! Click 📸 Post to publish.")
+                return
+        
+        send_message(user_id, "📝 Format not recognized. Using current article. Click 📸 Post to publish.")
     elif session.state == "waiting_confirmation":
         db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
         send_message(
@@ -208,25 +232,24 @@ def handle_callback(callback: dict):
 
 
 def handle_edit_text(user_id: int, session, db):
-    send_message(user_id, "✏️ Please send the corrected text:")
+    current = session.transcribed_text or ""
+    send_message(user_id, f"✏️ Current text:\n\n{current}\n\nSend the corrected version:")
     db.update_session(user_id, state="editing_text")
 
 
 def handle_edit_article(user_id: int, session, db):
-    article_text = f"""✏️ Edit the article below:
-
-📰 {session.title_ar}
-{session.content_ar}
-
----
-
-📰 {session.title_en}
-{session.content_en}
-
----
-
-Send the corrected version."""    
-    send_message(user_id, article_text)
+    # Send article in parts for easier editing
+    msg = f"✏️ *Arabic Title:*\n{session.title_ar}\n\n*Arabic Content:*\n{session.content_ar[:500]}"
+    if len(session.content_ar) > 500:
+        msg += f"\n... (continued)"
+    send_message(user_id, msg)
+    
+    msg2 = f"*English Title:*\n{session.title_en}\n\n*English Content:*\n{session.content_en[:500]}"
+    if len(session.content_en) > 500:
+        msg2 += f"\n... (continued)"
+    send_message(user_id, msg2)
+    
+    send_message(user_id, "📝 Send the corrected version in format:\n---\nArabic title:\n[title]\nContent:\n[content]\n---\nEnglish title:\n[title]\nContent:\n[content]")
     db.update_session(user_id, state="editing_article")
     db.update_session(user_id, state="editing_article")
 
