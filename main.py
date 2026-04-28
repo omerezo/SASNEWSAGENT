@@ -178,6 +178,35 @@ def handle_photo_message(user_id: int, photos: list, session, db):
     post_article_from_message(user_id, photo["file_id"], session, db)
 
 
+def handle_callback(callback: dict):
+    user_id = callback["from"]["id"]
+    data = callback["data"]
+    query_id = callback["id"]
+    
+    answer_callback_query(query_id)
+    
+    db = get_db()
+    session = db.get_session(user_id)
+    
+    if not session:
+        send_message(user_id, "Session expired. Send /start to begin.")
+        return
+    
+    if data == "edit_text":
+        handle_edit_text(user_id, session, db)
+    elif data == "edit_article":
+        handle_edit_article(user_id, session, db)
+    elif data == "confirm_yes":
+        handle_confirmation_yes(user_id, session, db)
+    elif data == "confirm_no":
+        handle_confirmation_no(user_id, session, db)
+    elif data == "post_news":
+        handle_post_news(user_id, session, db)
+    elif data == "action_cancel":
+        db.delete_session(user_id)
+        send_message(user_id, "❌ Cancelled. Send a voice note to start again.")
+
+
 def handle_edit_text(user_id: int, session, db):
     send_message(user_id, "✏️ Please send the corrected text:")
     db.update_session(user_id, state="editing_text")
@@ -198,6 +227,7 @@ def handle_edit_article(user_id: int, session, db):
 
 Send the corrected version."""    
     send_message(user_id, article_text)
+    db.update_session(user_id, state="editing_article")
     db.update_session(user_id, state="editing_article")
 
 
