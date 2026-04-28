@@ -82,6 +82,16 @@ def handle_message(msg: dict):
     try:
         user_id = msg["from"]["id"]
         
+        # Check if it's a group chat (chat_id == user_id means private)
+        chat_id = msg.get("chat", {}).get("id")
+        is_group = chat_id and chat_id != user_id
+        
+        if is_group:
+            # In groups, only respond to commands that mention the bot
+            text = msg.get("text", "")
+            if not text or not text.startswith("/"):
+                return
+        
         db = get_db()
         session = db.get_session(user_id)
         
