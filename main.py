@@ -174,6 +174,9 @@ def handle_photo(user_id, chat_id, photos, session, db):
 
 def handle_callback(callback):
     user_id = callback["from"]["id"]
+    # Get chat_id from callback message
+    msg = callback.get("message", {})
+    chat_id = msg.get("chat", {}).get("id") or user_id
     data = callback["data"]
     query_id = callback["id"]
     
@@ -183,24 +186,25 @@ def handle_callback(callback):
     session = db.get_session(user_id)
     
     if not session:
-        send_message(user_id, "Session expired.")
+        send_message(chat_id, "Session expired.")
         return
     
     if data == "edit_text":
-        send_message(user_id, f"✏️ Current:\n{session.transcribed_text}\n\nSend corrected:")
+        send_message(chat_id, f"✏️ Current:\n{session.transcribed_text}\n\nSend corrected:")
         db.update_session(user_id, state="editing_text")
     elif data == "confirm_yes":
-        handle_confirm_yes(user_id, session, db)
+        handle_confirm_yes(user_id, chat_id, session, db)
     elif data == "confirm_no":
-        send_message(user_id, "❌ Send voice note again.")
+        send_message(chat_id, "❌ Send voice note again.")
         db.update_session(user_id, state="waiting_voice")
     elif data == "post_news":
+        send_message(chat_id, "📸 Send an image.")
         send_message(user_id, "📸 Send an image.")
 
 
-def handle_confirm_yes(user_id, session, db):
+def handle_confirm_yes(user_id, chat_id, session, db):
     try:
-        send_message(user_id, "✍️ Creating article...")
+        send_message(chat_id, "✍️ Creating article...")
         from services.article import get_article_service
         article = get_article_service().generate_article(session.transcribed_text)
         
@@ -213,10 +217,10 @@ def handle_confirm_yes(user_id, session, db):
             excerpt_en=article.get("excerpt_en"),
             state="waiting_post")
         
-        send_message(user_id, f"📰 {article['title_ar']}\n{article['content_ar'][:200]}...\n\n📰 {article['title_en']}\n{article['content_en'][:200]}...", reply_markup=post_keyboard())
+        send_message(chat_id, f"📰 {article['title_ar']}\n{article['content_ar'][:200]}...\n\n📰 {article['title_en']}\n{article['content_en'][:200]}...", reply_markup=post_keyboard())
     except Exception as e:
         logger.error(f"Article error: {e}")
-        send_message(user_id, "❌ Error generating article.")
+        send_message(chat_id, "❌ Error generating article.")
 
 
 def post_article(user_id, chat_id, file_id, session, db):
