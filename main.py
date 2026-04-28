@@ -159,10 +159,11 @@ def handle_text_message(user_id: int, text: str, session, db):
 
 
 def handle_photo_message(user_id: int, photos: list, session, db):
-    logger.info(f"handle_photo_message called. session.state={session.state}, session.title_ar={session.title_ar}")
+    logger.info(f"handle_photo: state={session.state}, title_ar={session.title_ar}")
     
-    if session.state != "waiting_post":
-        send_message(user_id, "Please click the Post button first to confirm the article.")
+    if session.state != "waiting_post" or not session.title_ar:
+        logger.error(f"Invalid state or no article. state={session.state}, title_ar={session.title_ar}")
+        send_message(user_id, "Please confirm the article first by clicking Yes button.")
         return
     
     photo = photos[-1]
@@ -170,8 +171,6 @@ def handle_photo_message(user_id: int, photos: list, session, db):
     
     # Re-fetch session to get article data
     session = db.get_session(user_id)
-    logger.info(f"After update: session.title_ar={session.title_ar}")
-    
     post_article_from_message(user_id, photo["file_id"], session, db)
 
 
