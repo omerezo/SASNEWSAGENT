@@ -41,6 +41,13 @@ def download_file(file_path):
 
 
 # Keyboards
+def input_type_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "🎤 Voice", "callback_data": "input_voice"}],
+        [{"text": "📝 Text", "callback_data": "input_text"}]
+    ]}
+
+
 def confirmation_keyboard():
     return {"inline_keyboard": [
         [{"text": "✏️ Edit", "callback_data": "edit_text"}],
@@ -84,6 +91,11 @@ def root():
 
 
 # Handlers
+# Group trigger words
+GROUP_TRIGGERS = [".news", "خبر", "write article", "create news", "breaking"]
+GROUP_STOP = ["stop", "done", "finished", "cancel", "انهاء", "الغاء"]
+
+
 def handle_message(msg):
     try:
         user_id = msg["from"]["id"]
@@ -95,17 +107,60 @@ def handle_message(msg):
         
         if is_group:
             text = msg.get("text", "")
+            text_lower = text.lower() if text else ""
+            
+            # Check if this is a stop command
+            if any(stop in text_lower for stop in GROUP_STOP):
+                db = get_db()
+                session = db.get_session(user_id)
+                if session:
+                    db.delete_session(user_id)
+                    send_message(chat_id, "✅ Done. Send @yourbot to start again.")
+                return
+            
+            # Check if we should respond (trigger word in text or mention)
             entities = msg.get("entities", [])
             mentioned = any(ent.get("type") in ["mention", "bot_command"] for ent in entities)
             is_reply = msg.get("reply_to_message", {}).get("from", {}).get("is_bot") if msg.get("reply_to_message") else False
             
-            if text and not mentioned and not is_reply:
+            # Check for trigger words
+            triggered = any(trigger in text_lower for trigger in GROUP_TRIGGERS)
+            
+            if not (triggered or mentioned or is_reply):
+                # Check if already in a session
+                db = get_db()
+                session = db.get_session(user_id)
+                if not session or session.state == "waiting_voice":
+                    return  # Ignore if no active session
+            
+            # If triggered, reset session
+            if triggered:
+                db = get_db()
+                session = db.get_session(user_id)
+                if session:
+                    db.delete_session(user_id)
+                send_message(chat_id, "🎤 Choose input type:", reply_markup=input_type_keyboard())
                 return
         
         db = get_db()
         session = db.get_session(user_id)
+        
         if not session:
-            session = db.create_session(user_id, "waiting_voice")
+            # New session - ask for input type
+            session = db.create_session(user_id, "waiting_input_type")
+            if is_group:
+                send_message(target_chat, "🎤 Choose input type:", reply_markup=input_type_keyboard())
+            else:
+                send_message(target_chat, "🎤 Choose input type:", reply_markup=input_type_keyboard())
+            return
+        
+        # Handle based on state
+        if session.state == "waiting_input_type":
+            if "voice" in msg:
+                handle_voice(user_id, target_chat, msg["voice"], session, db)
+            elif "text" in msg:
+                handle_text_input(user_id, target_chat, msg["text"], session, db)
+            return
         
         if "voice" in msg:
             handle_voice(user_id, target_chat, msg["voice"], session, db)
@@ -146,11 +201,16 @@ def handle_text(user_id, chat_id, text, session, db):
     
     if text_lower in ["/start", "/restart"]:
         db.delete_session(user_id)
-        db.create_session(user_id, "waiting_voice")
-        send_message(chat_id, "🎤 Send me a voice note.")
-    elif text_lower in ["/cancel", "cancel"]:
+        db.create_session(user_id, "waiting_input_type")
+        send_message(chat_id, "🎤 Choose input type:", reply_markup=input_type_keyboard())
+    elif text_lower in ["/cancel", "cancel", "انهاء", "الغاء"]:
         db.delete_session(user_id)
-        send_message(chat_id, "❌ Cancelled.")
+        db.create_session(user_id, "waiting_input_type")
+        send_message(chat_id, "✅ Done. Send @yourbot or .news to start again.")
+    elif session.state == "waiting_input_type":
+        # Treat as article content
+        db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
+        send_message(chat_id, f"📝 You said:\n\n\"{text}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
     elif session.state == "editing_text":
         db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
         send_message(chat_id, f"📝 You said:\n\n\"{text}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
@@ -158,7 +218,7 @@ def handle_text(user_id, chat_id, text, session, db):
         db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
         send_message(chat_id, f"📝 You said:\n\n\"{text}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
     else:
-        send_message(chat_id, "🎤 Send me a voice note.")
+        send_message(chat_id, "🎤 Send .news to start or mention me.")
 
 
 def handle_photo(user_id, chat_id, photos, session, db):
@@ -174,7 +234,6 @@ def handle_photo(user_id, chat_id, photos, session, db):
 
 def handle_callback(callback):
     user_id = callback["from"]["id"]
-    # Get chat_id from callback message
     msg = callback.get("message", {})
     chat_id = msg.get("chat", {}).get("id") or user_id
     data = callback["data"]
@@ -185,18 +244,23 @@ def handle_callback(callback):
     db = get_db()
     session = db.get_session(user_id)
     
-    if not session:
-        send_message(chat_id, "Session expired.")
+    if data == "input_voice":
+        send_message(chat_id, "🎤 Send voice note or type message:")
+        db.update_session(user_id, state="waiting_voice")
+    elif data == "input_text":
+        send_message(chat_id, "📝 Type your news content:")
+        db.update_session(user_id, state="waiting_text")
+    elif not session:
+        send_message(chat_id, "Send .news to start.")
         return
-    
-    if data == "edit_text":
+    elif data == "edit_text":
         send_message(chat_id, f"✏️ Current:\n{session.transcribed_text}\n\nSend corrected:")
         db.update_session(user_id, state="editing_text")
     elif data == "confirm_yes":
         handle_confirm_yes(user_id, chat_id, session, db)
     elif data == "confirm_no":
-        send_message(chat_id, "❌ Send voice note again.")
-        db.update_session(user_id, state="waiting_voice")
+        send_message(chat_id, "❌ Send again.")
+        db.update_session(user_id, state="waiting_input_type")
     elif data == "post_news":
         send_message(chat_id, "📸 Send an image.")
         send_message(user_id, "📸 Send an image.")
@@ -243,8 +307,8 @@ def post_article(user_id, chat_id, file_id, session, db):
         
         if result.get("success"):
             news_id = result.get("id")
-            url = f"{config.website_base_url}/news/{news_id}"
-            send_message(chat_id, f"✅ Live!\n{url}")
+            url = f"{config.website_base_url}/news"  # Use /news without ID
+            send_message(chat_id, f"✅ Posted!\n{url}")
             db.delete_session(user_id)
         else:
             send_message(chat_id, "❌ Failed to post.")
