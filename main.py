@@ -206,9 +206,8 @@ def handle_text(user_id, chat_id, text, session, db):
     elif text_lower in ["/cancel", "cancel", "انهاء", "الغاء"]:
         db.delete_session(user_id)
         db.create_session(user_id, "waiting_input_type")
-        send_message(chat_id, "✅ Done. Send @yourbot or .news to start again.")
-    elif session.state == "waiting_input_type":
-        # Treat as article content
+        send_message(chat_id, "✅ Done. Send .news to start again.")
+    elif session.state in ["waiting_input_type", "waiting_text"]:
         db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
         send_message(chat_id, f"📝 You said:\n\n\"{text}\"\n\nIs this correct?", reply_markup=confirmation_keyboard())
     elif session.state == "editing_text":
