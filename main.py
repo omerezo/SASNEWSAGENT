@@ -97,8 +97,8 @@ def download_file(file_path):
 
 def input_type_keyboard():
     return {"inline_keyboard": [
-        [{"text": "🎤 Voice", "callback_data": "input_voice"}],
-        [{"text": "📝 Text", "callback_data": "input_text"}]
+        [{"text": "\U0001f3a4 Voice", "callback_data": "input_voice"}],
+        [{"text": "\U0001f4dd Text", "callback_data": "input_text"}]
     ]}
 
 
@@ -112,8 +112,37 @@ def confirmation_keyboard():
 
 def post_keyboard():
     return {"inline_keyboard": [
-        [{"text": "📸 Post with Image", "callback_data": "post_news"}]
+        [{"text": "✏️ Edit Article", "callback_data": "edit_article"}],
+        [{"text": "\U0001f4f8 Post with Image", "callback_data": "post_news"}]
     ]}
+
+
+# Telegram caps a single message at 4096 chars; trim with a clear marker if exceeded.
+_TG_MAX = 4000
+
+
+def _truncate(text, limit=_TG_MAX):
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 20] + "\n\n… (تم الاختصار)"
+
+
+def _send_article_preview(chat_id, article):
+    """Send the full article (AR + EN) so the user can read it. Buttons on the EN message."""
+    ar = (
+        f"\U0001f4f0 {article.get('title_ar','')}\n\n"
+        f"{article.get('content_ar','')}\n\n"
+        f"\U0001f4cc {article.get('excerpt_ar','')}"
+    )
+    en = (
+        f"\U0001f4f0 {article.get('title_en','')}\n\n"
+        f"{article.get('content_en','')}\n\n"
+        f"\U0001f4cc {article.get('excerpt_en','')}"
+    )
+    send_message(chat_id, _truncate(ar))
+    send_message(chat_id, _truncate(en), reply_markup=post_keyboard())
 
 
 # --- Small helpers -----------------------------------------------------------
@@ -121,7 +150,7 @@ def post_keyboard():
 def _send_confirmation(chat_id, text):
     send_message(
         chat_id,
-        f"📝 You said:\n\n\"{text}\"\n\nIs this correct?",
+        f"\U0001f4dd You said:\n\n\"{text}\"\n\nIs this correct?",
         reply_markup=confirmation_keyboard(),
     )
 
@@ -140,7 +169,7 @@ GROUP_STOP = {"stop", "done", "finished", "cancel", "انهاء", "الغاء"}
 
 
 def _is_stop_command(text_lower):
-    """Match 'stop' etc. only as standalone tokens — avoids 'stopwatch', 'cancellation'."""
+    """Match 'stop' etc. only as standalone tokens - avoids 'stopwatch', 'cancellation'."""
     if not text_lower:
         return False
     tokens = re.split(r"\W+", text_lower, flags=re.UNICODE)
@@ -157,7 +186,7 @@ def _is_triggered(text_lower):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Always return 200 — never let an exception trigger Telegram retry storms."""
+    """Always return 200 - never let an exception trigger Telegram retry storms."""
     try:
         data = request.get_json(force=True, silent=True) or {}
         if "callback_query" in data:
@@ -194,7 +223,6 @@ def handle_message(msg):
             text = msg.get("text", "") or ""
             text_lower = text.lower()
 
-            # Stop command
             if _is_stop_command(text_lower):
                 db = get_db()
                 if db.get_session(user_id):
@@ -202,7 +230,6 @@ def handle_message(msg):
                     send_message(chat_id, "✅ Done. Send .news to start again.")
                 return
 
-            # Decide whether to engage in this group message
             entities = msg.get("entities", []) or []
             mentioned = any(ent.get("type") in ["mention", "bot_command"] for ent in entities)
             reply_to = msg.get("reply_to_message") or {}
@@ -210,21 +237,18 @@ def handle_message(msg):
             triggered = _is_triggered(text_lower)
 
             if not (triggered or mentioned or is_reply_to_bot):
-                # No explicit signal — only continue if user already has an active session.
-                # Any active session means the user is mid-flow (voice, text, confirm, etc.)
-                # so process their message regardless of state.
+                # Any active session means the user is mid-flow - process their message regardless of state.
                 db = get_db()
                 session = db.get_session(user_id)
                 if not session:
                     return
 
-            # Trigger word: reset and (re)create session so the next message lands cleanly
             if triggered:
                 db = get_db()
                 if db.get_session(user_id):
                     db.delete_session(user_id)
                 db.create_session(user_id, "waiting_input_type")
-                send_message(chat_id, "🎤 Choose input type:", reply_markup=input_type_keyboard())
+                send_message(chat_id, "\U0001f3a4 Choose input type:", reply_markup=input_type_keyboard())
                 return
 
         db = get_db()
@@ -232,10 +256,9 @@ def handle_message(msg):
 
         if not session:
             db.create_session(user_id, "waiting_input_type")
-            send_message(target_chat, "🎤 Choose input type:", reply_markup=input_type_keyboard())
+            send_message(target_chat, "\U0001f3a4 Choose input type:", reply_markup=input_type_keyboard())
             return
 
-        # Route by state
         if session.state == "waiting_input_type":
             if "voice" in msg:
                 handle_voice(user_id, target_chat, msg["voice"], session, db)
@@ -261,7 +284,7 @@ def handle_text_input(user_id, chat_id, text, session, db):
 
 def handle_voice(user_id, chat_id, voice, session, db):
     try:
-        send_message(chat_id, "🎤 Processing...")
+        send_message(chat_id, "\U0001f3a4 Processing...")
         file_info = get_file(voice["file_id"])
         file_path = file_info.get("file_path")
         if not file_path:
@@ -270,7 +293,7 @@ def handle_voice(user_id, chat_id, voice, session, db):
 
         audio_data = download_file(file_path)
         if not audio_data:
-            send_message(chat_id, "Could not download audio.")
+            send_message(chat_id, "❌ Could not download audio.")
             return
 
         from services.transcription import get_transcription_service
@@ -293,7 +316,7 @@ def handle_text(user_id, chat_id, text, session, db):
     if cmd in ("/start", "/restart"):
         db.delete_session(user_id)
         db.create_session(user_id, "waiting_input_type")
-        send_message(chat_id, "🎤 Choose input type:", reply_markup=input_type_keyboard())
+        send_message(chat_id, "\U0001f3a4 Choose input type:", reply_markup=input_type_keyboard())
         return
 
     if cmd in ("/cancel", "cancel", "انهاء", "الغاء"):
@@ -302,13 +325,18 @@ def handle_text(user_id, chat_id, text, session, db):
         send_message(chat_id, "✅ Done. Send .news to start again.")
         return
 
+    # User is refining an already-generated article with free-text instructions.
+    if session.state == "editing_article":
+        handle_edit_article(user_id, chat_id, text, session, db)
+        return
+
     if session.state in ("waiting_input_type", "waiting_text", "waiting_voice",
                           "editing_text", "waiting_confirmation"):
         db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
         _send_confirmation(chat_id, text)
         return
 
-    send_message(chat_id, "🎤 Send .news to start or mention me.")
+    send_message(chat_id, "\U0001f3a4 Send .news to start or mention me.")
 
 
 def handle_photo(user_id, chat_id, photos, session, db):
@@ -334,15 +362,14 @@ def handle_callback(callback):
     db = get_db()
     session = db.get_session(user_id)
 
-    # Input-type taps: ensure a session exists before updating it
     if data in ("input_voice", "input_text"):
         if not session:
             session = db.create_session(user_id, "waiting_input_type")
         if data == "input_voice":
-            send_message(chat_id, "🎤 Send voice note or type message:")
+            send_message(chat_id, "\U0001f3a4 Send voice note or type message:")
             db.update_session(user_id, state="waiting_voice")
         else:
-            send_message(chat_id, "📝 Type your news content:")
+            send_message(chat_id, "\U0001f4dd Type your news content:")
             db.update_session(user_id, state="waiting_text")
         return
 
@@ -358,8 +385,21 @@ def handle_callback(callback):
     elif data == "confirm_no":
         send_message(chat_id, "❌ Send again.")
         db.update_session(user_id, state="waiting_input_type")
+    elif data == "edit_article":
+        if session.state != "waiting_post" or not session.title_ar:
+            send_message(chat_id, "Nothing to edit yet.")
+            return
+        send_message(
+            chat_id,
+            "✏️ What would you like to change?\n"
+            "Send your instructions in Arabic or English. Examples:\n"
+            "- make it shorter / اجعله أقصر\n"
+            "- change the title to ...\n"
+            "- add detail about the medals",
+        )
+        db.update_session(user_id, state="editing_article")
     elif data == "post_news":
-        send_message(chat_id, "📸 Send an image.")
+        send_message(chat_id, "\U0001f4f8 Send an image.")
 
 
 def handle_confirm_yes(user_id, chat_id, session, db):
@@ -368,24 +408,60 @@ def handle_confirm_yes(user_id, chat_id, session, db):
         from services.article import get_article_service
         article = get_article_service().generate_article(session.transcribed_text)
 
-        db.update_session(user_id,
+        db.update_session(
+            user_id,
             title_ar=article.get("title_ar"),
             title_en=article.get("title_en"),
             content_ar=article.get("content_ar"),
             content_en=article.get("content_en"),
             excerpt_ar=article.get("excerpt_ar"),
             excerpt_en=article.get("excerpt_en"),
-            state="waiting_post")
-
-        send_message(
-            chat_id,
-            f"📰 {article['title_ar']}\n{article['content_ar'][:200]}...\n\n"
-            f"📰 {article['title_en']}\n{article['content_en'][:200]}...",
-            reply_markup=post_keyboard(),
+            state="waiting_post",
         )
+
+        _send_article_preview(chat_id, article)
     except Exception as e:
         logger.error(f"Article error: {e}", exc_info=True)
         send_message(chat_id, "❌ Error generating article.")
+
+
+def handle_edit_article(user_id, chat_id, edit_instructions, session, db):
+    """Refine the existing article using user's edit instructions, then re-show it."""
+    if not session.title_ar:
+        send_message(chat_id, "Nothing to edit yet. Send .news to start.")
+        return
+    try:
+        send_message(chat_id, "✍️ Updating article...")
+        from services.article import get_article_service
+        previous = {
+            "title_ar": session.title_ar,
+            "title_en": session.title_en,
+            "content_ar": session.content_ar,
+            "content_en": session.content_en,
+            "excerpt_ar": session.excerpt_ar,
+            "excerpt_en": session.excerpt_en,
+        }
+        article = get_article_service().refine_article(
+            transcribed_text=session.transcribed_text or "",
+            previous_article=previous,
+            edit_instructions=edit_instructions,
+        )
+
+        db.update_session(
+            user_id,
+            title_ar=article.get("title_ar"),
+            title_en=article.get("title_en"),
+            content_ar=article.get("content_ar"),
+            content_en=article.get("content_en"),
+            excerpt_ar=article.get("excerpt_ar"),
+            excerpt_en=article.get("excerpt_en"),
+            state="waiting_post",
+        )
+
+        _send_article_preview(chat_id, article)
+    except Exception as e:
+        logger.error(f"Article edit error: {e}", exc_info=True)
+        send_message(chat_id, "❌ Error updating article. Try again or tap Post with Image.")
 
 
 def post_article(user_id, chat_id, file_id, session, db):

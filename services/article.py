@@ -14,24 +14,24 @@ logger = logging.getLogger(__name__)
 REQUIRED_FIELDS = ("title_ar", "title_en", "content_ar", "content_en", "excerpt_ar", "excerpt_en")
 
 
-PROMPT_TEMPLATE = """You are a senior bilingual sports news writer for SAS Academy (SAS — Sudani Academy Sport), a sports academy that develops athletes and runs training programs.
+PROMPT_TEMPLATE = """You are a senior bilingual sports news writer for SAS Academy (SAS - Sudani Academy Sport), a sports academy that develops athletes and runs training programs.
 
 Your task: convert the TRANSCRIBED TEXT below into a polished bilingual news article (Modern Standard Arabic + English).
 
 STYLE GUIDE
 - Professional, neutral, factual newsroom tone. No marketing fluff, no emojis, no hashtags.
-- Stick strictly to the facts in the transcribed text. Do NOT invent names, scores, dates, places, quotes, or numbers. If a detail is missing, simply omit it — do not fabricate.
-- Arabic must be Modern Standard Arabic (فصحى), not colloquial. English must be clean newsroom English.
+- Stick strictly to the facts in the transcribed text. Do NOT invent names, scores, dates, places, quotes, or numbers. If a detail is missing, simply omit it - do not fabricate.
+- Arabic must be Modern Standard Arabic (fus'ha), not colloquial. English must be clean newsroom English.
 - The Arabic version and the English version must convey the same facts; they are translations of each other, not separate articles.
 - Refer to the academy as "أكاديمية سوداني الرياضية" in Arabic and "SAS Academy" or "Sudani Academy Sport" in English when relevant.
 
 LENGTH TARGETS
-- title_ar / title_en: a single concise headline, roughly 60–100 characters. No trailing period.
-- excerpt_ar / excerpt_en: 1–2 sentences summarising the news, roughly 150–220 characters.
-- content_ar / content_en: 3–5 short paragraphs separated by blank lines, roughly 180–320 words.
+- title_ar / title_en: a single concise headline, roughly 60-100 characters. No trailing period.
+- excerpt_ar / excerpt_en: 1-2 sentences summarising the news, roughly 150-220 characters.
+- content_ar / content_en: 3-5 short paragraphs separated by blank lines, roughly 180-320 words.
 
 OUTPUT FORMAT
-Return ONLY a single JSON object — no markdown, no commentary, no code fences — with EXACTLY these keys:
+Return ONLY a single JSON object - no markdown, no commentary, no code fences - with EXACTLY these keys:
 {{
     "title_ar":   "...",
     "title_en":   "...",
@@ -48,6 +48,38 @@ TRANSCRIBED TEXT:
 """
 
 
+REFINE_TEMPLATE = """You are revising a previously generated bilingual sports news article for SAS Academy (Sudani Academy Sport) based on the user's edit instructions.
+
+Apply the user's instructions carefully. The same SAS Academy style guide and length targets still apply (Modern Standard Arabic; clean newsroom English; the Arabic and English versions must convey the same facts).
+
+RULES
+- Treat the ORIGINAL TRANSCRIBED TEXT as the source of truth for factual content. Do NOT invent names, scores, dates, places, quotes, or numbers that are not in it - unless the user's edit instructions explicitly provide new facts to add.
+- Apply the user's edit instructions even if they are written in Arabic or English. Edits to one language must be reflected in BOTH language versions so they stay aligned.
+- Preserve everything from the previous article that the user did not ask to change.
+- If the user's instructions are unclear or conflict with the source facts, prefer the safest interpretation that keeps the article truthful.
+
+OUTPUT FORMAT
+Return ONLY a single JSON object - no markdown, no commentary, no code fences - with EXACTLY these keys, all required and non-empty:
+{{
+    "title_ar":   "...",
+    "title_en":   "...",
+    "content_ar": "...",
+    "content_en": "...",
+    "excerpt_ar": "...",
+    "excerpt_en": "..."
+}}
+
+ORIGINAL TRANSCRIBED TEXT:
+{transcribed_text}
+
+PREVIOUS ARTICLE (the version to revise):
+{previous_article}
+
+USER'S EDIT INSTRUCTIONS:
+{edit_instructions}
+"""
+
+
 class ArticleGenerationService:
     def __init__(self):
         if not config.gemini_api_key:
@@ -55,36 +87,53 @@ class ArticleGenerationService:
         self.client = genai.Client(api_key=config.gemini_api_key)
         self.model = "gemini-2.5-flash"
 
+    def _call_gemini(self, prompt: str) -> Dict[str, str]:
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "temperature": 0.6,
+            },
+        )
+        raw_text = response.text or ""
+        logger.info(f"Raw response (first 300 chars): {raw_text[:300]}")
+
+        article = json.loads(raw_text)
+
+        missing = [f for f in REQUIRED_FIELDS if not (article.get(f) or "").strip()]
+        if missing:
+            raise ValueError(f"Missing/empty fields in article: {missing}")
+        return article
+
     def generate_article(self, transcribed_text: str) -> Dict[str, str]:
         logger.info(f"Generating article for text: {transcribed_text[:80]}...")
-
         prompt = PROMPT_TEMPLATE.format(transcribed_text=transcribed_text)
-
         try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.6,
-                },
-            )
-
-            raw_text = response.text or ""
-            logger.info(f"Raw response (first 300 chars): {raw_text[:300]}")
-
-            article = json.loads(raw_text)
-
-            # Validate every required field is present and non-empty
-            missing = [f for f in REQUIRED_FIELDS if not (article.get(f) or "").strip()]
-            if missing:
-                raise ValueError(f"Missing/empty fields in article: {missing}")
-
+            article = self._call_gemini(prompt)
             logger.info(f"Generated article: {article['title_ar'][:40]}...")
             return article
-
         except Exception as e:
             logger.error(f"Article generation error: {e}", exc_info=True)
+            raise
+
+    def refine_article(self, transcribed_text: str, previous_article: Dict[str, str],
+                       edit_instructions: str) -> Dict[str, str]:
+        """Re-generate the article applying the user's edit instructions to the previous version."""
+        logger.info(f"Refining article with instructions: {edit_instructions[:80]}...")
+
+        previous_json = json.dumps(previous_article, ensure_ascii=False, indent=2)
+        prompt = REFINE_TEMPLATE.format(
+            transcribed_text=transcribed_text or "(none provided)",
+            previous_article=previous_json,
+            edit_instructions=edit_instructions,
+        )
+        try:
+            article = self._call_gemini(prompt)
+            logger.info(f"Refined article: {article['title_ar'][:40]}...")
+            return article
+        except Exception as e:
+            logger.error(f"Article refine error: {e}", exc_info=True)
             raise
 
 
