@@ -26,13 +26,14 @@ class TranscriptionService:
             # For bytes, we need to use upload_file first
             upload_url = self.transcriber.upload_file(audio_data)
             logger.info(f"Uploaded to: {upload_url}")
-            
-            config = aai.TranscriptionConfig(
+
+            # NOTE: don't shadow the imported `config` module — use a distinct name
+            tx_config = aai.TranscriptionConfig(
                 language_code="ar",
                 speech_models=["universal-2"]
             )
-            
-            transcript = self.transcriber.transcribe(upload_url, config=config)
+
+            transcript = self.transcriber.transcribe(upload_url, config=tx_config)
             
             if transcript.status == aai.TranscriptStatus.error:
                 error_msg = transcript.error or "Unknown error"
