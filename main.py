@@ -210,10 +210,12 @@ def handle_message(msg):
             triggered = _is_triggered(text_lower)
 
             if not (triggered or mentioned or is_reply_to_bot):
-                # No explicit signal — only continue if user already has an active session
+                # No explicit signal — only continue if user already has an active session.
+                # Any active session means the user is mid-flow (voice, text, confirm, etc.)
+                # so process their message regardless of state.
                 db = get_db()
                 session = db.get_session(user_id)
-                if not session or session.state == "waiting_voice":
+                if not session:
                     return
 
             # Trigger word: reset and (re)create session so the next message lands cleanly
@@ -268,7 +270,7 @@ def handle_voice(user_id, chat_id, voice, session, db):
 
         audio_data = download_file(file_path)
         if not audio_data:
-            send_message(chat_id, "❌ Could not download audio.")
+            send_message(chat_id, "Could not download audio.")
             return
 
         from services.transcription import get_transcription_service
@@ -357,8 +359,6 @@ def handle_callback(callback):
         send_message(chat_id, "❌ Send again.")
         db.update_session(user_id, state="waiting_input_type")
     elif data == "post_news":
-        # Send only once — chat_id already covers private chats, and in groups
-        # the user picks up the prompt in the same chat.
         send_message(chat_id, "📸 Send an image.")
 
 
