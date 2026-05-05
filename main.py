@@ -97,23 +97,23 @@ def download_file(file_path):
 
 def input_type_keyboard():
     return {"inline_keyboard": [
-        [{"text": "\U0001f3a4 Voice", "callback_data": "input_voice"}],
-        [{"text": "\U0001f4dd Text", "callback_data": "input_text"}]
+        [{"text": "\U0001f3a4 صوت", "callback_data": "input_voice"}],
+        [{"text": "\U0001f4dd نص", "callback_data": "input_text"}]
     ]}
 
 
 def confirmation_keyboard():
     return {"inline_keyboard": [
-        [{"text": "✏️ Edit", "callback_data": "edit_text"}],
-        [{"text": "✅ Yes", "callback_data": "confirm_yes"}],
-        [{"text": "❌ No", "callback_data": "confirm_no"}]
+        [{"text": "✏️ تعديل", "callback_data": "edit_text"}],
+        [{"text": "✅ نعم", "callback_data": "confirm_yes"}],
+        [{"text": "❌ لا", "callback_data": "confirm_no"}]
     ]}
 
 
 def post_keyboard():
     return {"inline_keyboard": [
-        [{"text": "✏️ Edit Article", "callback_data": "edit_article"}],
-        [{"text": "\U0001f4f8 Post with Image", "callback_data": "post_news"}]
+        [{"text": "✏️ تعديل المقال", "callback_data": "edit_article"}],
+        [{"text": "\U0001f4f8 نشر مع صورة", "callback_data": "post_news"}]
     ]}
 
 
@@ -150,7 +150,7 @@ def _send_article_preview(chat_id, article):
 def _send_confirmation(chat_id, text):
     send_message(
         chat_id,
-        f"\U0001f4dd You said:\n\n\"{text}\"\n\nIs this correct?",
+        f"\U0001f4dd قلتَ:\n\n\"{text}\"\n\nهل هذا صحيح؟",
         reply_markup=confirmation_keyboard(),
     )
 
@@ -227,7 +227,7 @@ def handle_message(msg):
                 db = get_db()
                 if db.get_session(user_id):
                     db.delete_session(user_id)
-                    send_message(chat_id, "✅ Done. Send .news to start again.")
+                    send_message(chat_id, "✅ تم. أرسل .news للبدء من جديد.")
                 return
 
             entities = msg.get("entities", []) or []
@@ -248,7 +248,7 @@ def handle_message(msg):
                 if db.get_session(user_id):
                     db.delete_session(user_id)
                 db.create_session(user_id, "waiting_input_type")
-                send_message(chat_id, "\U0001f3a4 Choose input type:", reply_markup=input_type_keyboard())
+                send_message(chat_id, "\U0001f3a4 اختر نوع الإدخال:", reply_markup=input_type_keyboard())
                 return
 
         db = get_db()
@@ -256,7 +256,7 @@ def handle_message(msg):
 
         if not session:
             db.create_session(user_id, "waiting_input_type")
-            send_message(target_chat, "\U0001f3a4 Choose input type:", reply_markup=input_type_keyboard())
+            send_message(target_chat, "\U0001f3a4 اختر نوع الإدخال:", reply_markup=input_type_keyboard())
             return
 
         if session.state == "waiting_input_type":
@@ -284,11 +284,11 @@ def handle_text_input(user_id, chat_id, text, session, db):
 
 def handle_voice(user_id, chat_id, voice, session, db):
     try:
-        send_message(chat_id, "\U0001f3a4 Processing...")
+        send_message(chat_id, "\U0001f3a4 جاري المعالجة...")
         file_info = get_file(voice["file_id"])
         file_path = file_info.get("file_path")
         if not file_path:
-            send_message(chat_id, "❌ Could not download audio.")
+            send_message(chat_id, "❌ تعذر تحميل الصوت.")
             return
 
         audio_data = download_file(file_path)
@@ -300,14 +300,14 @@ def handle_voice(user_id, chat_id, voice, session, db):
         transcribed = get_transcription_service().transcribe_audio(audio_data)
 
         if not transcribed:
-            send_message(chat_id, "❌ Could not understand.")
+            send_message(chat_id, "❌ تعذر الفهم.")
             return
 
         db.update_session(user_id, transcribed_text=transcribed, state="waiting_confirmation")
         _send_confirmation(chat_id, transcribed)
     except Exception as e:
         logger.error(f"Voice error: {e}", exc_info=True)
-        send_message(chat_id, "❌ Error processing voice.")
+        send_message(chat_id, "❌ خطأ في معالجة الصوت.")
 
 
 def handle_text(user_id, chat_id, text, session, db):
@@ -336,12 +336,12 @@ def handle_text(user_id, chat_id, text, session, db):
         _send_confirmation(chat_id, text)
         return
 
-    send_message(chat_id, "\U0001f3a4 Send .news to start or mention me.")
+    send_message(chat_id, "\U0001f3a4 أرسل .news للبدء أو اذكرني.")
 
 
 def handle_photo(user_id, chat_id, photos, session, db):
     if session.state != "waiting_post" or not session.title_ar:
-        send_message(chat_id, "Please confirm article first.")
+        send_message(chat_id, "الرجاء تأكيد المقال أولاً.")
         return
 
     photo = photos[-1]
@@ -366,45 +366,45 @@ def handle_callback(callback):
         if not session:
             session = db.create_session(user_id, "waiting_input_type")
         if data == "input_voice":
-            send_message(chat_id, "\U0001f3a4 Send voice note or type message:")
+            send_message(chat_id, "\U0001f3a4 أرسل ملاحظة صوتية أو اكتب رسالة:")
             db.update_session(user_id, state="waiting_voice")
         else:
-            send_message(chat_id, "\U0001f4dd Type your news content:")
+            send_message(chat_id, "\U0001f4dd اكتب محتوى الخبر:")
             db.update_session(user_id, state="waiting_text")
         return
 
     if not session:
-        send_message(chat_id, "Send .news to start.")
+        send_message(chat_id, "أرسل .news للبدء.")
         return
 
     if data == "edit_text":
-        send_message(chat_id, f"✏️ Current:\n{session.transcribed_text}\n\nSend corrected:")
+        send_message(chat_id, f"✏️ الحالي:\n{session.transcribed_text}\n\nأرسل التصحيح:")
         db.update_session(user_id, state="editing_text")
     elif data == "confirm_yes":
         handle_confirm_yes(user_id, chat_id, session, db)
     elif data == "confirm_no":
-        send_message(chat_id, "❌ Send again.")
+        send_message(chat_id, "❌ أرسل مجدداً.")
         db.update_session(user_id, state="waiting_input_type")
     elif data == "edit_article":
         if session.state != "waiting_post" or not session.title_ar:
-            send_message(chat_id, "Nothing to edit yet.")
+            send_message(chat_id, "لا يوجد شيء للتعديل بعد.")
             return
         send_message(
             chat_id,
-            "✏️ What would you like to change?\n"
-            "Send your instructions in Arabic or English. Examples:\n"
-            "- make it shorter / اجعله أقصر\n"
-            "- change the title to ...\n"
-            "- add detail about the medals",
+            "✏️ ماذا تريد أن تغيّر؟\n"
+            "أرسل تعليماتك. أمثلة:\n"
+            "- اجعله أقصر\n"
+            "- غيّر العنوان إلى ...\n"
+            "- أضف تفاصيل عن الميداليات",
         )
         db.update_session(user_id, state="editing_article")
     elif data == "post_news":
-        send_message(chat_id, "\U0001f4f8 Send an image.")
+        send_message(chat_id, "\U0001f4f8 أرسل صورة.")
 
 
 def handle_confirm_yes(user_id, chat_id, session, db):
     try:
-        send_message(chat_id, "✍️ Creating article...")
+        send_message(chat_id, "✍️ جاري إنشاء المقال...")
         from services.article import get_article_service
         article = get_article_service().generate_article(session.transcribed_text)
 
@@ -422,16 +422,16 @@ def handle_confirm_yes(user_id, chat_id, session, db):
         _send_article_preview(chat_id, article)
     except Exception as e:
         logger.error(f"Article error: {e}", exc_info=True)
-        send_message(chat_id, "❌ Error generating article.")
+        send_message(chat_id, "❌ خطأ في إنشاء المقال.")
 
 
 def handle_edit_article(user_id, chat_id, edit_instructions, session, db):
     """Refine the existing article using user's edit instructions, then re-show it."""
     if not session.title_ar:
-        send_message(chat_id, "Nothing to edit yet. Send .news to start.")
+        send_message(chat_id, "لا يوجد شيء للتعديل بعد. أرسل .news للبدء.")
         return
     try:
-        send_message(chat_id, "✍️ Updating article...")
+        send_message(chat_id, "✍️ جاري تحديث المقال...")
         from services.article import get_article_service
         previous = {
             "title_ar": session.title_ar,
@@ -461,7 +461,7 @@ def handle_edit_article(user_id, chat_id, edit_instructions, session, db):
         _send_article_preview(chat_id, article)
     except Exception as e:
         logger.error(f"Article edit error: {e}", exc_info=True)
-        send_message(chat_id, "❌ Error updating article. Try again or tap Post with Image.")
+        send_message(chat_id, "❌ خطأ في تحديث المقال. حاول مجدداً أو اضغط نشر مع صورة.")
 
 
 def post_article(user_id, chat_id, file_id, session, db):
@@ -469,7 +469,7 @@ def post_article(user_id, chat_id, file_id, session, db):
         file_info = get_file(file_id)
         photo_data = download_file(file_info.get("file_path"))
         if not photo_data:
-            send_message(chat_id, "❌ Could not download image.")
+            send_message(chat_id, "❌ تعذر تحميل الصورة.")
             return
 
         article = {
@@ -487,13 +487,13 @@ def post_article(user_id, chat_id, file_id, session, db):
 
         if result.get("success"):
             url = f"{config.website_base_url}/news"
-            send_message(chat_id, f"✅ Posted!\n{url}")
+            send_message(chat_id, f"✅ تم النشر!\n{url}")
             db.delete_session(user_id)
         else:
-            send_message(chat_id, "❌ Failed to post.")
+            send_message(chat_id, "❌ فشل النشر.")
     except Exception as e:
         logger.error(f"Post error: {e}", exc_info=True)
-        send_message(chat_id, "❌ Error posting.")
+        send_message(chat_id, "❌ خطأ في النشر.")
 
 
 if __name__ == "__main__":
