@@ -195,6 +195,9 @@ def _normalize_command(text):
 GROUP_TRIGGERS = [".news", "خبر", "write article", "create news", "breaking"]
 GROUP_STOP = {"stop", "done", "finished", "cancel", "انهاء", "الغاء"}
 PHOTOS_TRIGGERS = ["صور", ".photos", "photos"]
+VIDEO_TRIGGERS = ["فيديو", ".video", "video"]
+
+_YT_RE = re.compile(r'(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([A-Za-z0-9_-]{11})')
 
 
 def _is_stop_command(text_lower):
@@ -216,6 +219,13 @@ def _is_photos_trigger(text_lower):
         return False
     s = text_lower.strip()
     return any(s == t or s.startswith(t + " ") or s.startswith(t + "\n") for t in PHOTOS_TRIGGERS)
+
+
+def _is_video_trigger(text_lower):
+    if not text_lower:
+        return False
+    s = text_lower.strip()
+    return any(s == t or s.startswith(t + " ") or s.startswith(t + "\n") for t in VIDEO_TRIGGERS)
 
 
 # --- Routes ------------------------------------------------------------------
@@ -272,8 +282,9 @@ def handle_message(msg):
             is_reply_to_bot = bool((reply_to.get("from") or {}).get("is_bot"))
             triggered = _is_triggered(text_lower)
             photos_triggered = _is_photos_trigger(text_lower)
+            video_triggered = _is_video_trigger(text_lower)
 
-            if not (triggered or mentioned or is_reply_to_bot or photos_triggered):
+            if not (triggered or mentioned or is_reply_to_bot or photos_triggered or video_triggered):
                 # Any active session means the user is mid-flow - process their message regardless of state.
                 db = get_db()
                 session = db.get_session(user_id)
@@ -287,6 +298,13 @@ def handle_message(msg):
                 handle_photos_start(user_id, chat_id, db)
                 return
 
+            if video_triggered:
+                db = get_db()
+                if db.get_session(user_id):
+                    db.delete_session(user_id)
+                handle_video_start(user_id, chat_id, db)
+                return
+
             if triggered:
                 db = get_db()
                 if db.get_session(user_id):
@@ -297,14 +315,21 @@ def handle_message(msg):
 
         db = get_db()
 
-        # Photos trigger in DMs (groups handle it above)
+        # Photos / video triggers in DMs (groups handle them above)
         if not is_group and "text" in msg:
             raw_text = msg.get("text", "") or ""
-            if _is_photos_trigger(raw_text.lower()):
+            raw_lower = raw_text.lower()
+            if _is_photos_trigger(raw_lower):
                 existing = db.get_session(user_id)
                 if existing:
                     db.delete_session(user_id)
                 handle_photos_start(user_id, target_chat, db)
+                return
+            if _is_video_trigger(raw_lower):
+                existing = db.get_session(user_id)
+                if existing:
+                    db.delete_session(user_id)
+                handle_video_start(user_id, target_chat, db)
                 return
 
         session = db.get_session(user_id)
@@ -333,9 +358,14 @@ def handle_message(msg):
 
 def handle_text_input(user_id, chat_id, text, session, db):
     """First text message received while in 'waiting_input_type' state."""
-    if _is_photos_trigger(text.lower()):
+    t = text.lower()
+    if _is_photos_trigger(t):
         db.delete_session(user_id)
         handle_photos_start(user_id, chat_id, db)
+        return
+    if _is_video_trigger(t):
+        db.delete_session(user_id)
+        handle_video_start(user_id, chat_id, db)
         return
     db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
     _send_confirmation(chat_id, text)
@@ -372,13 +402,27 @@ def handle_voice(user_id, chat_id, voice, session, db):
 def handle_text(user_id, chat_id, text, session, db):
     cmd = _normalize_command(text)
 
-    # Photos title input takes priority so "صور" can be a valid album title
+    # Video / photos state inputs take priority over trigger re-detection
+    if session.state == "waiting_video_title":
+        handle_video_title(user_id, chat_id, text, session, db)
+        return
+
+    if session.state == "waiting_video_url":
+        handle_video_url(user_id, chat_id, text, session, db)
+        return
+
     if session.state == "waiting_photos_title":
         handle_photos_title(user_id, chat_id, text, session, db)
         return
 
-    # Photos trigger resets from any other state
-    if _is_photos_trigger(text.lower()):
+    # Trigger words reset from any other state
+    t = text.lower()
+    if _is_video_trigger(t):
+        db.delete_session(user_id)
+        handle_video_start(user_id, chat_id, db)
+        return
+
+    if _is_photos_trigger(t):
         db.delete_session(user_id)
         handle_photos_start(user_id, chat_id, db)
         return
@@ -410,6 +454,11 @@ def handle_text(user_id, chat_id, text, session, db):
 
 
 def handle_photo(user_id, chat_id, photos, session, db):
+    if session.state == "waiting_video_cover":
+        photo = photos[-1]
+        handle_video_cover(user_id, chat_id, photo["file_id"], session, db)
+        return
+
     if session.state == "waiting_photos_upload":
         photo = photos[-1]
         handle_photos_upload(user_id, chat_id, photo["file_id"], session, db)
@@ -546,6 +595,65 @@ def handle_edit_article(user_id, chat_id, edit_instructions, session, db):
     except Exception as e:
         logger.error(f"Article edit error: {e}", exc_info=True)
         send_message(chat_id, "❌ خطأ في تحديث المقال. حاول مجدداً أو اضغط نشر مع صورة.")
+
+
+def handle_video_start(user_id, chat_id, db):
+    db.create_session(user_id, "waiting_video_title")
+    send_message(chat_id, "\U0001f3ac أدخل عنوان الفيديو بالعربية:")
+
+
+def handle_video_title(user_id, chat_id, text, session, db):
+    db.update_session(user_id, title_ar=text.strip(), transcribed_text=None, state="waiting_video_url")
+    send_message(chat_id, f"\U0001f4cc العنوان: {text.strip()}\n\nأرسل رابط الفيديو على يوتيوب:")
+
+
+def handle_video_url(user_id, chat_id, text, session, db):
+    match = _YT_RE.search(text.strip())
+    if not match:
+        send_message(chat_id, "❌ الرابط غير صحيح. أرسل رابط يوتيوب صحيحاً (youtube.com أو youtu.be):")
+        return
+    db.update_session(user_id, transcribed_text=text.strip(), state="waiting_video_cover")
+    send_message(chat_id, "✅ تم. الآن أرسل صورة الغلاف:")
+
+
+def handle_video_cover(user_id, chat_id, file_id, session, db):
+    db.update_session(user_id, image_file_id=file_id)
+    session = db.get_session(user_id)
+    post_video(user_id, chat_id, session, db)
+
+
+def post_video(user_id, chat_id, session, db):
+    try:
+        send_message(chat_id, "⏳ جاري الترجمة والنشر...")
+
+        from services.article import get_article_service
+        title_en = get_article_service().translate_title(session.title_ar or "")
+
+        cover_image = None
+        if session.image_file_id:
+            file_info = get_file(session.image_file_id)
+            photo_data = download_file(file_info.get("file_path"))
+            if photo_data:
+                b64 = base64.b64encode(photo_data).decode()
+                cover_image = f"data:image/jpeg;base64,{b64}"
+
+        from services.website import get_website_api
+        result = get_website_api().post_video({
+            "title_ar": session.title_ar,
+            "title_en": title_en,
+            "youtube_url": session.transcribed_text,
+            "cover_image": cover_image,
+        })
+
+        if result.get("success") or result.get("id"):
+            url = f"{config.website_base_url}/videos"
+            send_message(chat_id, f"✅ تم النشر!\n\U0001f3ac {session.title_ar}\n\U0001f517 {url}")
+            db.delete_session(user_id)
+        else:
+            send_message(chat_id, "❌ فشل النشر. حاول مجدداً.")
+    except Exception as e:
+        logger.error(f"post_video error: {e}", exc_info=True)
+        send_message(chat_id, "❌ خطأ في نشر الفيديو.")
 
 
 def handle_photos_start(user_id, chat_id, db):

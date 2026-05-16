@@ -75,6 +75,32 @@ class WebsiteAPIService:
             raise
 
 
+    def post_video(self, data: Dict) -> Dict:
+        url = f"{self.base_url}/api/agent/video"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Agent-Key": self.api_key,
+        }
+        payload = {
+            "title_ar": data.get("title_ar"),
+            "title_en": data.get("title_en"),
+            "youtube_url": data.get("youtube_url"),
+            "cover_image": data.get("cover_image"),
+        }
+        try:
+            logger.info(f"Posting video to {url}")
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            logger.info(f"Video response: {response.status_code} - {response.text[:200]}")
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Video API HTTP error: {e} - {response.text}")
+            raise
+        except Exception as e:
+            logger.error(f"Video API error: {e}")
+            raise
+
+
 _website_api = None
 
 def get_website_api() -> WebsiteAPIService:
