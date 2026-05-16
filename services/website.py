@@ -49,6 +49,32 @@ class WebsiteAPIService:
             raise
 
 
+    def post_gallery(self, data: Dict) -> Dict:
+        url = f"{self.base_url}/api/agent/photos"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Agent-Key": self.api_key,
+        }
+        payload = {
+            "title_ar": data.get("title_ar"),
+            "title_en": data.get("title_en"),
+            "images": data.get("images", []),
+            "published": True,
+        }
+        try:
+            logger.info(f"Posting gallery to {url} with {len(payload['images'])} image(s)")
+            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            logger.info(f"Gallery response: {response.status_code} - {response.text[:200]}")
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"Gallery API HTTP error: {e} - {response.text}")
+            raise
+        except Exception as e:
+            logger.error(f"Gallery API error: {e}")
+            raise
+
+
 _website_api = None
 
 def get_website_api() -> WebsiteAPIService:

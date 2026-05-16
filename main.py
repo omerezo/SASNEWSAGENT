@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 import base64
 import logging
 import requests
@@ -117,6 +118,13 @@ def post_keyboard():
     ]}
 
 
+def photos_more_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "📷 إضافة المزيد", "callback_data": "photos_more"}],
+        [{"text": "✅ نشر الآن", "callback_data": "photos_done"}]
+    ]}
+
+
 # Telegram caps a single message at 4096 chars; trim with a clear marker if exceeded.
 _TG_MAX = 4000
 
@@ -166,6 +174,7 @@ def _normalize_command(text):
 
 GROUP_TRIGGERS = [".news", "خبر", "write article", "create news", "breaking"]
 GROUP_STOP = {"stop", "done", "finished", "cancel", "انهاء", "الغاء"}
+PHOTOS_TRIGGERS = ["صور", ".photos", "photos"]
 
 
 def _is_stop_command(text_lower):
@@ -180,6 +189,13 @@ def _is_triggered(text_lower):
     if not text_lower:
         return False
     return any(trig in text_lower for trig in GROUP_TRIGGERS)
+
+
+def _is_photos_trigger(text_lower):
+    if not text_lower:
+        return False
+    s = text_lower.strip()
+    return any(s == t or s.startswith(t + " ") or s.startswith(t + "\n") for t in PHOTOS_TRIGGERS)
 
 
 # --- Routes ------------------------------------------------------------------
@@ -235,13 +251,21 @@ def handle_message(msg):
             reply_to = msg.get("reply_to_message") or {}
             is_reply_to_bot = bool((reply_to.get("from") or {}).get("is_bot"))
             triggered = _is_triggered(text_lower)
+            photos_triggered = _is_photos_trigger(text_lower)
 
-            if not (triggered or mentioned or is_reply_to_bot):
+            if not (triggered or mentioned or is_reply_to_bot or photos_triggered):
                 # Any active session means the user is mid-flow - process their message regardless of state.
                 db = get_db()
                 session = db.get_session(user_id)
                 if not session:
                     return
+
+            if photos_triggered:
+                db = get_db()
+                if db.get_session(user_id):
+                    db.delete_session(user_id)
+                handle_photos_start(user_id, chat_id, db)
+                return
 
             if triggered:
                 db = get_db()
@@ -252,6 +276,17 @@ def handle_message(msg):
                 return
 
         db = get_db()
+
+        # Photos trigger in DMs (groups handle it above)
+        if not is_group and "text" in msg:
+            raw_text = msg.get("text", "") or ""
+            if _is_photos_trigger(raw_text.lower()):
+                existing = db.get_session(user_id)
+                if existing:
+                    db.delete_session(user_id)
+                handle_photos_start(user_id, target_chat, db)
+                return
+
         session = db.get_session(user_id)
 
         if not session:
@@ -278,6 +313,10 @@ def handle_message(msg):
 
 def handle_text_input(user_id, chat_id, text, session, db):
     """First text message received while in 'waiting_input_type' state."""
+    if _is_photos_trigger(text.lower()):
+        db.delete_session(user_id)
+        handle_photos_start(user_id, chat_id, db)
+        return
     db.update_session(user_id, transcribed_text=text, state="waiting_confirmation")
     _send_confirmation(chat_id, text)
 
@@ -313,6 +352,17 @@ def handle_voice(user_id, chat_id, voice, session, db):
 def handle_text(user_id, chat_id, text, session, db):
     cmd = _normalize_command(text)
 
+    # Photos title input takes priority so "صور" can be a valid album title
+    if session.state == "waiting_photos_title":
+        handle_photos_title(user_id, chat_id, text, session, db)
+        return
+
+    # Photos trigger resets from any other state
+    if _is_photos_trigger(text.lower()):
+        db.delete_session(user_id)
+        handle_photos_start(user_id, chat_id, db)
+        return
+
     if cmd in ("/start", "/restart"):
         db.delete_session(user_id)
         db.create_session(user_id, "waiting_input_type")
@@ -340,6 +390,11 @@ def handle_text(user_id, chat_id, text, session, db):
 
 
 def handle_photo(user_id, chat_id, photos, session, db):
+    if session.state == "waiting_photos_upload":
+        photo = photos[-1]
+        handle_photos_upload(user_id, chat_id, photo["file_id"], session, db)
+        return
+
     if session.state != "waiting_post" or not session.title_ar:
         send_message(chat_id, "الرجاء تأكيد المقال أولاً.")
         return
@@ -400,6 +455,15 @@ def handle_callback(callback):
         db.update_session(user_id, state="editing_article")
     elif data == "post_news":
         send_message(chat_id, "\U0001f4f8 أرسل صورة.")
+    elif data == "photos_more":
+        if session and session.state == "waiting_photos_upload":
+            send_message(chat_id, "📷 أرسل الصور الإضافية:")
+    elif data == "photos_done":
+        if not session or session.state != "waiting_photos_upload":
+            send_message(chat_id, "لا توجد صور للنشر.")
+            return
+        session = db.get_session(user_id)
+        post_gallery(user_id, chat_id, session, db)
 
 
 def handle_confirm_yes(user_id, chat_id, session, db):
@@ -462,6 +526,71 @@ def handle_edit_article(user_id, chat_id, edit_instructions, session, db):
     except Exception as e:
         logger.error(f"Article edit error: {e}", exc_info=True)
         send_message(chat_id, "❌ خطأ في تحديث المقال. حاول مجدداً أو اضغط نشر مع صورة.")
+
+
+def handle_photos_start(user_id, chat_id, db):
+    db.create_session(user_id, "waiting_photos_title")
+    send_message(chat_id, "\U0001f5bc️ أدخل عنوان الألبوم بالعربية:")
+
+
+def handle_photos_title(user_id, chat_id, text, session, db):
+    db.update_session(user_id, title_ar=text.strip(), photo_file_ids="[]", state="waiting_photos_upload")
+    send_message(chat_id, f"\U0001f4cc العنوان: {text.strip()}\n\nأرسل الصور الآن:")
+
+
+def handle_photos_upload(user_id, chat_id, file_id, session, db):
+    existing = json.loads(session.photo_file_ids or "[]")
+    existing.append(file_id)
+    db.update_session(user_id, photo_file_ids=json.dumps(existing))
+    count = len(existing)
+    label = "صورة" if count == 1 else "صور"
+    send_message(
+        chat_id,
+        f"✅ تم استلام {count} {label}.\n\nهل تريد إضافة المزيد أم النشر الآن؟",
+        reply_markup=photos_more_keyboard(),
+    )
+
+
+def post_gallery(user_id, chat_id, session, db):
+    try:
+        file_ids = json.loads(session.photo_file_ids or "[]")
+        if not file_ids:
+            send_message(chat_id, "❌ لا توجد صور للنشر.")
+            return
+
+        send_message(chat_id, "⏳ جاري الترجمة وتحميل الصور...")
+
+        from services.article import get_article_service
+        title_en = get_article_service().translate_title(session.title_ar or "")
+
+        images = []
+        for fid in file_ids:
+            file_info = get_file(fid)
+            photo_data = download_file(file_info.get("file_path"))
+            if photo_data:
+                b64 = base64.b64encode(photo_data).decode()
+                images.append(f"data:image/jpeg;base64,{b64}")
+
+        if not images:
+            send_message(chat_id, "❌ تعذر تحميل الصور.")
+            return
+
+        from services.website import get_website_api
+        result = get_website_api().post_gallery({
+            "title_ar": session.title_ar,
+            "title_en": title_en,
+            "images": images,
+        })
+
+        if result.get("success") or result.get("id") or result.get("slug"):
+            url = f"{config.website_base_url}/photos"
+            send_message(chat_id, f"✅ تم النشر!\n\U0001f5bc️ {session.title_ar}\n\U0001f517 {url}")
+            db.delete_session(user_id)
+        else:
+            send_message(chat_id, "❌ فشل النشر. حاول مجدداً.")
+    except Exception as e:
+        logger.error(f"post_gallery error: {e}", exc_info=True)
+        send_message(chat_id, "❌ خطأ في نشر الصور.")
 
 
 def post_article(user_id, chat_id, file_id, session, db):

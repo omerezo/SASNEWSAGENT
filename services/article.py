@@ -117,6 +117,20 @@ class ArticleGenerationService:
             logger.error(f"Article generation error: {e}", exc_info=True)
             raise
 
+    def translate_title(self, title_ar: str) -> str:
+        """Translate an Arabic title to English."""
+        prompt = (
+            "Translate the following Arabic title to English. "
+            "Return ONLY the English translation, nothing else.\n\n"
+            f"Arabic: {title_ar}"
+        )
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config={"temperature": 0.3},
+        )
+        return (response.text or title_ar).strip()
+
     def refine_article(self, transcribed_text: str, previous_article: Dict[str, str],
                        edit_instructions: str) -> Dict[str, str]:
         """Re-generate the article applying the user's edit instructions to the previous version."""

@@ -24,6 +24,7 @@ class UserSession:
     excerpt_ar: Optional[str] = None
     excerpt_en: Optional[str] = None
     image_file_id: Optional[str] = None
+    photo_file_ids: Optional[str] = None  # JSON array of Telegram file_ids
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -53,15 +54,17 @@ class Database:
                     excerpt_ar TEXT,
                     excerpt_en TEXT,
                     image_file_id VARCHAR(255),
+                    photo_file_ids TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            cur.execute("ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS photo_file_ids TEXT")
             self.conn.commit()
     
     def get_session(self, user_id: int) -> Optional[UserSession]:
         with self.conn.cursor() as cur:
-            cur.execute("SELECT user_id, state, transcribed_text, title_ar, title_en, content_ar, content_en, excerpt_ar, excerpt_en, image_file_id, created_at, updated_at FROM user_sessions WHERE user_id = %s", (user_id,))
+            cur.execute("SELECT user_id, state, transcribed_text, title_ar, title_en, content_ar, content_en, excerpt_ar, excerpt_en, image_file_id, photo_file_ids, created_at, updated_at FROM user_sessions WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
             if row:
                 return UserSession(
@@ -75,8 +78,9 @@ class Database:
                     excerpt_ar=row[7],
                     excerpt_en=row[8],
                     image_file_id=row[9],
-                    created_at=row[10],
-                    updated_at=row[11]
+                    photo_file_ids=row[10],
+                    created_at=row[11],
+                    updated_at=row[12]
                 )
             return None
     
