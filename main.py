@@ -56,6 +56,26 @@ def send_message(chat_id, text, reply_markup=None):
     _post_telegram("sendMessage", data, timeout=10)
 
 
+def send_message_get_id(chat_id, text, reply_markup=None):
+    data = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        data["reply_markup"] = reply_markup
+    resp = _post_telegram("sendMessage", data, timeout=10)
+    if resp:
+        try:
+            return resp.json().get("result", {}).get("message_id")
+        except Exception:
+            pass
+    return None
+
+
+def edit_message(chat_id, message_id, text, reply_markup=None):
+    data = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if reply_markup:
+        data["reply_markup"] = reply_markup
+    _post_telegram("editMessageText", data, timeout=10)
+
+
 def answer_callback_query(query_id, text=None):
     try:
         data = {"callback_query_id": query_id}
@@ -534,7 +554,7 @@ def handle_photos_start(user_id, chat_id, db):
 
 
 def handle_photos_title(user_id, chat_id, text, session, db):
-    db.update_session(user_id, title_ar=text.strip(), photo_file_ids="[]", state="waiting_photos_upload")
+    db.update_session(user_id, title_ar=text.strip(), photo_file_ids="[]", transcribed_text=None, state="waiting_photos_upload")
     send_message(chat_id, f"\U0001f4cc العنوان: {text.strip()}\n\nأرسل الصور الآن:")
 
 
@@ -544,11 +564,17 @@ def handle_photos_upload(user_id, chat_id, file_id, session, db):
     db.update_session(user_id, photo_file_ids=json.dumps(existing))
     count = len(existing)
     label = "صورة" if count == 1 else "صور"
-    send_message(
-        chat_id,
-        f"✅ تم استلام {count} {label}.\n\nهل تريد إضافة المزيد أم النشر الآن؟",
-        reply_markup=photos_more_keyboard(),
-    )
+    text = f"✅ تم استلام {count} {label}.\n\nهل تريد إضافة المزيد أم النشر الآن؟"
+
+    # transcribed_text stores the message_id of the keyboard message so we
+    # edit it on each subsequent photo instead of flooding the chat.
+    existing_msg_id = session.transcribed_text
+    if existing_msg_id and existing_msg_id.isdigit():
+        edit_message(chat_id, int(existing_msg_id), text, reply_markup=photos_more_keyboard())
+    else:
+        msg_id = send_message_get_id(chat_id, text, reply_markup=photos_more_keyboard())
+        if msg_id:
+            db.update_session(user_id, transcribed_text=str(msg_id))
 
 
 def post_gallery(user_id, chat_id, session, db):
