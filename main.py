@@ -583,7 +583,7 @@ def post_gallery(user_id, chat_id, session, db):
         })
 
         if result.get("success") or result.get("id") or result.get("slug"):
-            url = f"{config.website_base_url}/photos"
+            url = f"{config.website_base_url}/gallery"
             send_message(chat_id, f"✅ تم النشر!\n\U0001f5bc️ {session.title_ar}\n\U0001f517 {url}")
             db.delete_session(user_id)
         else:
