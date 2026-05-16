@@ -138,6 +138,16 @@ def post_keyboard():
     ]}
 
 
+def video_category_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "🏷️ عام", "callback_data": "video_cat_general"},
+         {"text": "🏋️ تدريب", "callback_data": "video_cat_training"}],
+        [{"text": "🎉 فعاليات", "callback_data": "video_cat_events"},
+         {"text": "🏆 منافسات", "callback_data": "video_cat_competitions"}],
+        [{"text": "⭐ أبرز اللحظات", "callback_data": "video_cat_highlights"}],
+    ]}
+
+
 def photos_more_keyboard():
     return {"inline_keyboard": [
         [{"text": "📷 إضافة المزيد", "callback_data": "photos_more"}],
@@ -524,6 +534,12 @@ def handle_callback(callback):
         db.update_session(user_id, state="editing_article")
     elif data == "post_news":
         send_message(chat_id, "\U0001f4f8 أرسل صورة.")
+    elif data.startswith("video_cat_"):
+        if not session or session.state != "waiting_video_category":
+            return
+        category = data[len("video_cat_"):]
+        db.update_session(user_id, excerpt_ar=category, state="waiting_video_cover")
+        send_message(chat_id, "✅ تم. الآن أرسل صورة الغلاف:")
     elif data == "photos_more":
         if session and session.state == "waiting_photos_upload":
             send_message(chat_id, "📷 أرسل الصور الإضافية:")
@@ -612,8 +628,8 @@ def handle_video_url(user_id, chat_id, text, session, db):
     if not match:
         send_message(chat_id, "❌ الرابط غير صحيح. أرسل رابط يوتيوب صحيحاً (youtube.com أو youtu.be):")
         return
-    db.update_session(user_id, transcribed_text=text.strip(), state="waiting_video_cover")
-    send_message(chat_id, "✅ تم. الآن أرسل صورة الغلاف:")
+    db.update_session(user_id, transcribed_text=text.strip(), state="waiting_video_category")
+    send_message(chat_id, "✅ تم. اختر تصنيف الفيديو:", reply_markup=video_category_keyboard())
 
 
 def handle_video_cover(user_id, chat_id, file_id, session, db):
@@ -643,6 +659,7 @@ def post_video(user_id, chat_id, session, db):
             "title_en": title_en,
             "youtube_url": session.transcribed_text,
             "cover_image": cover_image,
+            "category": session.excerpt_ar or "general",
         })
 
         if result.get("success") or result.get("id"):

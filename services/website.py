@@ -86,6 +86,7 @@ class WebsiteAPIService:
             "title_en": data.get("title_en"),
             "youtube_url": data.get("youtube_url"),
             "cover_image": data.get("cover_image"),
+            "category": data.get("category", "general"),
         }
         try:
             logger.info(f"Posting video to {url}")
