@@ -204,6 +204,7 @@ def _normalize_command(text):
 
 GROUP_TRIGGERS = [".news", "خبر", "write article", "create news", "breaking"]
 GROUP_STOP = {"stop", "done", "finished", "cancel", "انهاء", "الغاء"}
+HELP_TRIGGERS = {"help", "مساعدة", "/help"}
 PHOTOS_TRIGGERS = ["صور", ".photos", "photos"]
 VIDEO_TRIGGERS = ["فيديو", ".video", "video"]
 
@@ -236,6 +237,58 @@ def _is_video_trigger(text_lower):
         return False
     s = text_lower.strip()
     return any(s == t or s.startswith(t + " ") or s.startswith(t + "\n") for t in VIDEO_TRIGGERS)
+
+
+def _is_help_command(text_lower):
+    if not text_lower:
+        return False
+    cmd = _normalize_command(text_lower.strip())
+    if cmd == "/help":
+        return True
+    tokens = re.split(r"\W+", text_lower, flags=re.UNICODE)
+    return any(tok in HELP_TRIGGERS for tok in tokens if tok)
+
+
+def send_help(chat_id):
+    msg = (
+        "🤖 مرحباً! إليك شرح كامل لكيفية استخدام البوت:\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📰 نشر خبر\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "اكتب: خبر  أو  .news\n"
+        "1. اختر طريقة الإدخال (صوت أو نص)\n"
+        "2. أرسل محتوى الخبر\n"
+        "3. تأكد من النص المُدخل\n"
+        "4. راجع المقال الذي أنشأه البوت\n"
+        "5. عدّل إذا أردت، ثم اضغط «نشر مع صورة»\n"
+        "6. أرسل صورة للخبر ← يُنشر فوراً\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🖼️ نشر صور\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "اكتب: صور  أو  .photos\n"
+        "1. أدخل عنوان الألبوم بالعربية\n"
+        "2. أرسل الصور (يمكن إرسال أكثر من صورة)\n"
+        "3. اضغط «إضافة المزيد» لمتابعة الإرسال\n"
+        "4. اضغط «نشر الآن» عند الانتهاء ← يُنشر فوراً\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬 نشر فيديو\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "اكتب: فيديو  أو  .video\n"
+        "1. أدخل عنوان الفيديو بالعربية\n"
+        "2. ارفع الفيديو على يوتيوب أولاً، ثم أرسل الرابط\n"
+        "3. اختر التصنيف من القائمة\n"
+        "4. أرسل صورة الغلاف ← يُنشر فوراً\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "⚙️ أوامر عامة\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "• مساعدة  /  help — عرض هذه القائمة\n"
+        "• انهاء  /  cancel — إلغاء العملية الحالية"
+    )
+    send_message(chat_id, msg)
 
 
 # --- Routes ------------------------------------------------------------------
@@ -286,6 +339,10 @@ def handle_message(msg):
                     send_message(chat_id, "✅ تم. أرسل .news للبدء من جديد.")
                 return
 
+            if _is_help_command(text_lower):
+                send_help(chat_id)
+                return
+
             entities = msg.get("entities", []) or []
             mentioned = any(ent.get("type") in ["mention", "bot_command"] for ent in entities)
             reply_to = msg.get("reply_to_message") or {}
@@ -325,10 +382,13 @@ def handle_message(msg):
 
         db = get_db()
 
-        # Photos / video triggers in DMs (groups handle them above)
+        # Help / photos / video triggers in DMs (groups handle them above)
         if not is_group and "text" in msg:
             raw_text = msg.get("text", "") or ""
             raw_lower = raw_text.lower()
+            if _is_help_command(raw_lower):
+                send_help(target_chat)
+                return
             if _is_photos_trigger(raw_lower):
                 existing = db.get_session(user_id)
                 if existing:
@@ -435,6 +495,10 @@ def handle_text(user_id, chat_id, text, session, db):
     if _is_photos_trigger(t):
         db.delete_session(user_id)
         handle_photos_start(user_id, chat_id, db)
+        return
+
+    if _is_help_command(t):
+        send_help(chat_id)
         return
 
     if cmd in ("/start", "/restart"):
